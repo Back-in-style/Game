@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>슬레이어 키우기 - 방치형 RPG</title>
-    <!-- 가장 안정적인 Phaser 3 CDN -->
+    <!-- Phaser 3 CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
     <style>
         body {
@@ -24,7 +24,7 @@
 <body>
 
 <script>
-// --- 1. 게임 전역 데이터 (스탯 & 재화) ---
+// --- 1. 전역 데이터 ---
 const gameState = {
     gold: 0,
     atk: 5,                 // 기본 공격력
@@ -34,12 +34,12 @@ const gameState = {
     critRateCost: 20,       // 치명타 확률 강화 비용
     critDmg: 150,           // 치명타 데미지 (%)
     
-    atkSpeed: 800,          // 공격 속도 (ms, 작을수록 빠름)
+    atkSpeed: 800,          // 공격 속도 (ms)
     atkSpeedCost: 30,       // 공격 속도 강화 비용
     
     stage: 1,               // 현재 스테이지
     killCount: 0,           // 현재 스테이지 처치 수
-    maxKills: 5             // 다음 스테이지 진입 처치 수
+    maxKills: 5             // 필요 처치 수
 };
 
 // --- 2. 메인 게임 씬 ---
@@ -49,26 +49,23 @@ class MainScene extends Phaser.Scene {
     }
 
     create() {
-        // [1] 배경 영역
-        this.add.rectangle(200, 160, 400, 320, 0x1e1e24); // 상단 전투 필드
-        this.add.rectangle(200, 460, 400, 280, 0x2b2d42); // 하단 UI 영역
+        // [1] 배경
+        this.add.rectangle(200, 160, 400, 320, 0x1e1e24); 
+        this.add.rectangle(200, 460, 400, 280, 0x2b2d42); 
 
         // [2] 상단 UI 텍스트 미리 생성
         this.stageText = this.add.text(200, 20, '', { fontSize: '20px', fill: '#00e676', fontStyle: 'bold' }).setOrigin(0.5);
         this.goldText = this.add.text(20, 50, '', { fontSize: '18px', fill: '#ffd700', fontStyle: 'bold' });
-        
-        // [3] 스탯 정보 텍스트 미리 생성
         this.atkText = this.add.text(20, 80, '', { fontSize: '14px', fill: '#ffffff' });
         this.critText = this.add.text(20, 100, '', { fontSize: '14px', fill: '#ffeb3b' });
         this.spdText = this.add.text(20, 120, '', { fontSize: '14px', fill: '#00e5ff' });
 
-        // [4] 주인공 슬레이어
+        // [3] 주인공 슬레이어
         this.player = this.add.rectangle(80, 220, 35, 35, 0x29b6f6);
         this.add.text(80, 190, "슬레이어", { fontSize: '12px', fill: '#ffffff' }).setOrigin(0.5);
 
-        // [5] 하단 업그레이드 버튼 그룹 생성
-        
-        // 1) 공격력 강화 버튼
+        // [4] 하단 업그레이드 버튼 및 텍스트 생성
+        // 1) 공격력 버튼
         this.btnAtkUpgrade = this.add.rectangle(200, 370, 360, 45, 0xd90429).setInteractive({ useHandCursor: true });
         this.textAtkUpgrade = this.add.text(200, 370, '', { fontSize: '15px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
 
@@ -82,7 +79,7 @@ class MainScene extends Phaser.Scene {
             }
         });
 
-        // 2) 치명타 확률 강화 버튼
+        // 2) 치명타 버튼
         this.btnCritUpgrade = this.add.rectangle(200, 430, 360, 45, 0xf77f00).setInteractive({ useHandCursor: true });
         this.textCritUpgrade = this.add.text(200, 430, '', { fontSize: '15px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
 
@@ -97,7 +94,7 @@ class MainScene extends Phaser.Scene {
             }
         });
 
-        // 3) 공격 속도 강화 버튼
+        // 3) 공격속도 버튼
         this.btnSpdUpgrade = this.add.rectangle(200, 490, 360, 45, 0x00b4d8).setInteractive({ useHandCursor: true });
         this.textSpdUpgrade = this.add.text(200, 490, '', { fontSize: '15px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
 
@@ -105,4 +102,19 @@ class MainScene extends Phaser.Scene {
             if (gameState.atkSpeed <= 100) return;
             if (gameState.gold >= gameState.atkSpeedCost) {
                 gameState.gold -= gameState.atkSpeedCost;
-                gameState.atkSpeed = Math.max(100, gameState.atkSpeed - 3
+                gameState.atkSpeed = Math.max(100, gameState.atkSpeed - 30);
+                gameState.atkSpeedCost = Math.floor(gameState.atkSpeedCost * 1.7);
+                
+                this.startAutoAttackTimer();
+                this.updateUI();
+                this.playBtnTween(this.btnSpdUpgrade);
+            }
+        });
+
+        // [5] 초기 실행
+        this.updateUI();
+        this.spawnMonster();
+        this.startAutoAttackTimer();
+    }
+
+    // 공격 타이
