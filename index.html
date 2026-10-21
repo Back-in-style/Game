@@ -24,7 +24,7 @@
 <body>
 
 <script>
-// --- 1. 게임 전역 데이터 ---
+// --- 1. 게임 전역 데이터 (단 한 번만 선언) ---
 const gameState = {
     gold: 0,
     atk: 5,                 // 기본 공격력
@@ -34,12 +34,12 @@ const gameState = {
     critRateCost: 20,       // 치명타 확률 강화 비용
     critDmg: 150,           // 치명타 데미지 (%)
     
-    atkSpeed: 800,          // 공격 속도 (ms, 작을수록 빠름)
+    atkSpeed: 800,          // 공격 속도 (ms)
     atkSpeedCost: 30,       // 공격 속도 강화 비용
     
     stage: 1,               // 현재 스테이지
     killCount: 0,           // 현재 스테이지 처치 수
-    maxKills: 5             // 다음 스테이지 진입 처치 수
+    maxKills: 5             // 필요 처치 수
 };
 
 // --- 2. 메인 게임 씬 ---
@@ -112,7 +112,7 @@ class MainScene extends Phaser.Scene {
             }
         });
 
-        // UI 갱신 및 오토 기능 시작
+        // UI 갱신 및 오토 실행
         this.updateUI();
         this.spawnMonster();
         this.startAutoAttackTimer();
@@ -131,7 +131,7 @@ class MainScene extends Phaser.Scene {
         });
     }
 
-    // 버튼 클릭 피드백 애니메이션
+    // 버튼 애니메이션
     playBtnTween(target) {
         this.tweens.add({
             targets: target,
@@ -153,7 +153,7 @@ class MainScene extends Phaser.Scene {
         };
     }
 
-    // 주인공 자동 공격
+    // 자동 공격
     autoAttack() {
         if (!this.currentMonster || this.currentMonster.hp <= 0) return;
 
@@ -178,7 +178,7 @@ class MainScene extends Phaser.Scene {
         });
     }
 
-    // 데미지 처리 (안전한 Pure JS 난수 사용)
+    // 데미지 적용
     damageMonster(amount, isCrit) {
         if (!this.currentMonster) return;
 
@@ -236,7 +236,7 @@ class MainScene extends Phaser.Scene {
         });
     }
 
-    // UI 동기화 (방어 코드 추가)
+    // UI 동기화
     updateUI() {
         if (!this.textAtkUpgrade || !this.stageText) return;
 
@@ -257,4 +257,26 @@ class MainScene extends Phaser.Scene {
         if (gameState.atkSpeed <= 100) {
             this.textSpdUpgrade.setText(`공격 속도 강화 - MAX`);
         } else {
-            this.textSpdUpgrade.setText
+            this.textSpdUpgrade.setText(`공격 속도 강화 - ${gameState.atkSpeedCost} G`);
+        }
+    }
+}
+
+// --- 3. Phaser 실행 설정 ---
+const config = {
+    type: Phaser.AUTO,
+    width: 400,
+    height: 600,
+    backgroundColor: '#0d0d11',
+    scene: MainScene,
+    scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH
+    }
+};
+
+const game = new Phaser.Game(config);
+</script>
+
+</body>
+</html>
