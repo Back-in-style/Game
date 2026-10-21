@@ -24,7 +24,7 @@
 <body>
 
 <script>
-// --- 1. 전역 데이터 ---
+// --- 1. 게임 전역 데이터 ---
 const gameState = {
     gold: 0,
     atk: 5,                 // 기본 공격력
@@ -34,12 +34,12 @@ const gameState = {
     critRateCost: 20,       // 치명타 확률 강화 비용
     critDmg: 150,           // 치명타 데미지 (%)
     
-    atkSpeed: 800,          // 공격 속도 (ms)
+    atkSpeed: 800,          // 공격 속도 (ms, 작을수록 빠름)
     atkSpeedCost: 30,       // 공격 속도 강화 비용
     
     stage: 1,               // 현재 스테이지
     killCount: 0,           // 현재 스테이지 처치 수
-    maxKills: 5             // 필요 처치 수
+    maxKills: 5             // 다음 스테이지 진입 처치 수
 };
 
 // --- 2. 메인 게임 씬 ---
@@ -49,7 +49,7 @@ class MainScene extends Phaser.Scene {
     }
 
     create() {
-        // [1] 배경
+        // [1] 배경 영역
         this.add.rectangle(200, 160, 400, 320, 0x1e1e24); 
         this.add.rectangle(200, 460, 400, 280, 0x2b2d42); 
 
@@ -64,8 +64,9 @@ class MainScene extends Phaser.Scene {
         this.player = this.add.rectangle(80, 220, 35, 35, 0x29b6f6);
         this.add.text(80, 190, "슬레이어", { fontSize: '12px', fill: '#ffffff' }).setOrigin(0.5);
 
-        // [4] 하단 업그레이드 버튼 및 텍스트 생성
-        // 1) 공격력 버튼
+        // [4] 하단 업그레이드 버튼 그룹 생성
+        
+        // 1) 공격력 강화 버튼
         this.btnAtkUpgrade = this.add.rectangle(200, 370, 360, 45, 0xd90429).setInteractive({ useHandCursor: true });
         this.textAtkUpgrade = this.add.text(200, 370, '', { fontSize: '15px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
 
@@ -79,7 +80,7 @@ class MainScene extends Phaser.Scene {
             }
         });
 
-        // 2) 치명타 버튼
+        // 2) 치명타 확률 강화 버튼
         this.btnCritUpgrade = this.add.rectangle(200, 430, 360, 45, 0xf77f00).setInteractive({ useHandCursor: true });
         this.textCritUpgrade = this.add.text(200, 430, '', { fontSize: '15px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
 
@@ -94,7 +95,7 @@ class MainScene extends Phaser.Scene {
             }
         });
 
-        // 3) 공격속도 버튼
+        // 3) 공격 속도 강화 버튼
         this.btnSpdUpgrade = this.add.rectangle(200, 490, 360, 45, 0x00b4d8).setInteractive({ useHandCursor: true });
         this.textSpdUpgrade = this.add.text(200, 490, '', { fontSize: '15px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
 
@@ -111,10 +112,149 @@ class MainScene extends Phaser.Scene {
             }
         });
 
-        // [5] 초기 실행
+        // UI 갱신 및 오토 기능 시작
         this.updateUI();
         this.spawnMonster();
         this.startAutoAttackTimer();
     }
 
-    // 공격 타이
+    // 공격 타이머 관리
+    startAutoAttackTimer() {
+        if (this.attackTimer) {
+            this.attackTimer.destroy();
+        }
+        this.attackTimer = this.time.addEvent({
+            delay: gameState.atkSpeed,
+            callback: this.autoAttack,
+            callbackScope: this,
+            loop: true
+        });
+    }
+
+    // 버튼 클릭 피드백 애니메이션
+    playBtnTween(target) {
+        this.tweens.add({
+            targets: target,
+            scaleX: 0.95,
+            scaleY: 0.95,
+            duration: 50,
+            yoyo: true
+        });
+    }
+
+    // 몬스터 생성
+    spawnMonster() {
+        const hp = gameState.stage * 15;
+        this.currentMonster = {
+            sprite: this.add.rectangle(280, 220, 40, 40, 0xef233c),
+            hp: hp,
+            maxHp: hp,
+            hpText: this.add.text(280, 190, `HP: ${hp}`, { fontSize: '12px', fill: '#ff8a80' }).setOrigin(0.5)
+        };
+    }
+
+    // 주인공 자동 공격
+    autoAttack() {
+        if (!this.currentMonster || this.currentMonster.hp <= 0) return;
+
+        const isCrit = (Math.random() * 100) < gameState.critRate;
+        let finalDamage = gameState.atk;
+        
+        if (isCrit) {
+            finalDamage = Math.floor(gameState.atk * (gameState.critDmg / 100));
+        }
+
+        const slashColor = isCrit ? 0xffea00 : 0x00e5ff;
+        const slash = this.add.rectangle(this.player.x + 20, this.player.y, 20, 6, slashColor);
+        
+        this.tweens.add({
+            targets: slash,
+            x: this.currentMonster.sprite.x,
+            duration: 100,
+            onComplete: () => {
+                slash.destroy();
+                this.damageMonster(finalDamage, isCrit);
+            }
+        });
+    }
+
+    // 데미지 처리 (안전한 Pure JS 난수 사용)
+    damageMonster(amount, isCrit) {
+        if (!this.currentMonster) return;
+
+        this.currentMonster.hp -= amount;
+
+        const dmgColor = isCrit ? '#ff1744' : '#ffeb3b';
+        const dmgTextStr = isCrit ? `💥 ${amount}!` : `-${amount}`;
+        const fontSize = isCrit ? '22px' : '16px';
+        const offsetX = Math.floor(Math.random() * 20) - 10;
+
+        const dmgText = this.add.text(
+            this.currentMonster.sprite.x + offsetX, 
+            160, 
+            dmgTextStr, 
+            { fontSize: fontSize, fill: dmgColor, fontStyle: 'bold' }
+        ).setOrigin(0.5);
+
+        this.tweens.add({
+            targets: dmgText,
+            y: 120,
+            alpha: 0,
+            duration: isCrit ? 600 : 400,
+            onComplete: () => dmgText.destroy()
+        });
+
+        if (this.currentMonster.hp > 0) {
+            this.currentMonster.hpText.setText(`HP: ${this.currentMonster.hp}`);
+        } else {
+            this.killMonster();
+        }
+
+        this.updateUI();
+    }
+
+    // 몬스터 처치
+    killMonster() {
+        gameState.gold += gameState.stage * 8;
+        gameState.killCount += 1;
+
+        if (this.currentMonster) {
+            this.currentMonster.sprite.destroy();
+            this.currentMonster.hpText.destroy();
+            this.currentMonster = null;
+        }
+
+        if (gameState.killCount >= gameState.maxKills) {
+            gameState.stage += 1;
+            gameState.killCount = 0;
+        }
+
+        this.updateUI();
+
+        this.time.delayedCall(250, () => {
+            this.spawnMonster();
+        });
+    }
+
+    // UI 동기화 (방어 코드 추가)
+    updateUI() {
+        if (!this.textAtkUpgrade || !this.stageText) return;
+
+        this.stageText.setText(`STAGE ${gameState.stage} (${gameState.killCount}/${gameState.maxKills})`);
+        this.goldText.setText(`골드: ${gameState.gold} G`);
+        this.atkText.setText(`공격력: ${gameState.atk}`);
+        this.critText.setText(`치명타: ${gameState.critRate}% (데미지 ${gameState.critDmg}%)`);
+        this.spdText.setText(`공격속도: ${(1000 / gameState.atkSpeed).toFixed(2)}회/초`);
+
+        this.textAtkUpgrade.setText(`공격력 강화 (+2) - ${gameState.atkCost} G`);
+        
+        if (gameState.critRate >= 100) {
+            this.textCritUpgrade.setText(`치명타 확률 강화 - MAX`);
+        } else {
+            this.textCritUpgrade.setText(`치명타 확률 (+1%) - ${gameState.critRateCost} G`);
+        }
+
+        if (gameState.atkSpeed <= 100) {
+            this.textSpdUpgrade.setText(`공격 속도 강화 - MAX`);
+        } else {
+            this.textSpdUpgrade.setText
