@@ -1,5 +1,165 @@
 <!DOCTYPE html>
-<html>
-<head><title>My Game</title></head>
-<body><h1>게임 테스트 페이지입니다!</h1></body>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D 방치형 키우기 게임</title>
+    <!-- Phaser 3 CDN 로드 -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+
+<script>
+// --- 1. 게임 상태 데이터 (자원 및 업그레이드 정보) ---
+const gameState = {
+    gold: 0,            // 현재 보유 골드
+    goldPerClick: 1,    // 클릭당 골드 획득량
+    goldPerSec: 0,      // 초당 자동 골드 수급량
+    monsterHp: 10,      // 현재 몬스터 HP
+    maxMonsterHp: 10,   // 몬스터 최대 HP
+    monsterLevel: 1,    // 몬스터 레벨
+    upgradeClickCost: 10, // 클릭 공격력 강화 비용
+    upgradeAutoCost: 50   // 용사 채용(자동 골드) 강화 비용
+};
+
+// --- 2. Phaser 메인 씬 (MainScene) ---
+class MainScene extends Phaser.Scene {
+    constructor() {
+        super({ key: 'MainScene' });
+    }
+
+    create() {
+        // [UI 텍스트 세팅]
+        this.goldText = this.add.text(20, 20, `골드: ${gameState.gold}`, { fontSize: '24px', fill: '#ffd700' });
+        this.dpsText = this.add.text(20, 50, `초당 골드(DPS): ${gameState.goldPerSec}`, { fontSize: '18px', fill: '#ffffff' });
+        this.monsterText = this.add.text(200, 100, `Lv.${gameState.monsterLevel} 슬라임\nHP: ${gameState.monsterHp}/${gameState.maxMonsterHp}`, { fontSize: '20px', fill: '#ff4d4d', align: 'center' }).setOrigin(0.5);
+
+        // [몬스터 에셋 대용 도형 (나중에 AI 생성 PNG로 교체가능)]
+        this.monster = this.add.rectangle(200, 220, 120, 120, 0x44ff44);
+        this.monster.setInteractive({ useHandCursor: true });
+
+        // 몬스터 클릭(터치) 이벤트
+        this.monster.on('pointerdown', () => {
+            this.damageMonster(gameState.goldPerClick);
+            
+            // 클릭 피드백 애니메이션 (살짝 줄어들었다 확대)
+            this.tweens.add({
+                targets: this.monster,
+                scaleX: 0.9,
+                scaleY: 0.9,
+                duration: 50,
+                yoyo: true
+            });
+        });
+
+        // [업그레이드 버튼 1: 클릭 공격력 강화]
+        this.btnUpgradeClick = this.add.rectangle(200, 360, 320, 40, 0x3366cc).setInteractive({ useHandCursor: true });
+        this.textUpgradeClick = this.add.text(200, 360, `공격력 강화 (+1) - 비용: ${gameState.upgradeClickCost}G`, { fontSize: '14px', fill: '#ffffff' }).setOrigin(0.5);
+
+        this.btnUpgradeClick.on('pointerdown', () => {
+            if (gameState.gold >= gameState.upgradeClickCost) {
+                gameState.gold -= gameState.upgradeClickCost;
+                gameState.goldPerClick += 1;
+                gameState.upgradeClickCost = Math.floor(gameState.upgradeClickCost * 1.5); // 비용 상승
+                this.updateUI();
+            }
+        });
+
+        // [업그레이드 버튼 2: 자동 공격 동료 채용]
+        this.btnUpgradeAuto = this.add.rectangle(200, 420, 320, 40, 0x9933cc).setInteractive({ useHandCursor: true });
+        this.textUpgradeAuto = this.add.text(200, 420, `용사 고용 (+1G/초) - 비용: ${gameState.upgradeAutoCost}G`, { fontSize: '14px', fill: '#ffffff' }).setOrigin(0.5);
+
+        this.btnUpgradeAuto.on('pointerdown', () => {
+            if (gameState.gold >= gameState.upgradeAutoCost) {
+                gameState.gold -= gameState.upgradeAutoCost;
+                gameState.goldPerSec += 1;
+                gameState.upgradeAutoCost = Math.floor(gameState.upgradeAutoCost * 1.8); // 비용 상승
+                this.updateUI();
+            }
+        });
+
+        // [방치형 타이머] 1초마다 자동 골드 획득
+        this.time.addEvent({
+            delay: 1000,
+            callback: this.autoCollect,
+            callbackScope: this,
+            loop: true
+        });
+    }
+
+    // 몬스터에게 데미지 처리
+    damageMonster(amount) {
+        gameState.monsterHp -= amount;
+
+        // 데미지 텍스트 팝업 효과
+        const damageText = this.add.text(200 + Phaser.Math.Between(-20, 20), 180, `-${amount}`, { fontSize: '20px', fill: '#ffeb3b', fontStyle: 'bold' }).setOrigin(0.5);
+        this.tweens.add({
+            targets: damageText,
+            y: 130,
+            alpha: 0,
+            duration: 600,
+            onComplete: () => damageText.destroy()
+        });
+
+        // 몬스터 처치 시
+        if (gameState.monsterHp <= 0) {
+            const earnedGold = gameState.monsterLevel * 5;
+            gameState.gold += earnedGold;
+
+            // 다음 레벨 몬스터 생성
+            gameState.monsterLevel += 1;
+            gameState.maxMonsterHp = Math.floor(gameState.maxMonsterHp * 1.4);
+            gameState.monsterHp = gameState.maxMonsterHp;
+        }
+
+        this.updateUI();
+    }
+
+    // 초당 자동 수급 처리
+    autoCollect() {
+        if (gameState.goldPerSec > 0) {
+            this.damageMonster(gameState.goldPerSec);
+        }
+    }
+
+    // UI 텍스트 동기화
+    updateUI() {
+        this.goldText.setText(`골드: ${gameState.gold}`);
+        this.dpsText.setText(`초당 골드(DPS): ${gameState.goldPerSec}`);
+        this.monsterText.setText(`Lv.${gameState.monsterLevel} 몬스터\nHP: ${gameState.monsterHp}/${gameState.maxMonsterHp}`);
+        this.textUpgradeClick.setText(`공격력 강화 (+1) - 비용: ${gameState.upgradeClickCost}G`);
+        this.textUpgradeAuto.setText(`용사 고용 (+1G/초) - 비용: ${gameState.upgradeAutoCost}G`);
+    }
+}
+
+// --- 3. Phaser 게임 환경 설정 (모바일 대응 가로세로 비율) ---
+const config = {
+    type: Phaser.AUTO,
+    width: 400,
+    height: 600,
+    backgroundColor: '#222222',
+    scene: MainScene,
+    scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH
+    }
+};
+
+const game = new Phaser.Game(config);
+</script>
+
+</body>
 </html>
