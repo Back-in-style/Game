@@ -32,7 +32,6 @@ const gameState = {
     
     critRate: 10,           // 치명타 확률 (%)
     critRateCost: 20,       // 치명타 확률 강화 비용
-    
     critDmg: 150,           // 치명타 데미지 (%)
     
     atkSpeed: 800,          // 공격 속도 (ms, 작을수록 빠름)
@@ -50,30 +49,24 @@ class MainScene extends Phaser.Scene {
     }
 
     create() {
-        // [배경 영역 분리]
+        // [배경 영역]
         this.add.rectangle(200, 160, 400, 320, 0x1e1e24); // 상단 전투 필드
         this.add.rectangle(200, 460, 400, 280, 0x2b2d42); // 하단 UI 영역
 
-        // [상단 UI 텍스트]
-        this.stageText = this.add.text(200, 20, `STAGE ${gameState.stage} (${gameState.killCount}/${gameState.maxKills})`, { fontSize: '20px', fill: '#00e676', fontStyle: 'bold' }).setOrigin(0.5);
-        this.goldText = this.add.text(20, 50, `골드: ${gameState.gold} G`, { fontSize: '18px', fill: '#ffd700', fontStyle: 'bold' });
+        // [상단 UI 텍스트 미리 생성]
+        this.stageText = this.add.text(200, 20, '', { fontSize: '20px', fill: '#00e676', fontStyle: 'bold' }).setOrigin(0.5);
+        this.goldText = this.add.text(20, 50, '', { fontSize: '18px', fill: '#ffd700', fontStyle: 'bold' });
         
-        // [스탯 정보 텍스트]
-        this.atkText = this.add.text(20, 80, `공격력: ${gameState.atk}`, { fontSize: '14px', fill: '#ffffff' });
-        this.critText = this.add.text(20, 100, `치명타: ${gameState.critRate}% (데미지 ${gameState.critDmg}%)`, { fontSize: '14px', fill: '#ffeb3b' });
-        this.spdText = this.add.text(20, 120, `공격속도: ${(1000 / gameState.atkSpeed).toFixed(2)}회/초`, { fontSize: '14px', fill: '#00e5ff' });
+        // [스탯 정보 텍스트 미리 생성]
+        this.atkText = this.add.text(20, 80, '', { fontSize: '14px', fill: '#ffffff' });
+        this.critText = this.add.text(20, 100, '', { fontSize: '14px', fill: '#ffeb3b' });
+        this.spdText = this.add.text(20, 120, '', { fontSize: '14px', fill: '#00e5ff' });
 
         // [주인공 슬레이어]
         this.player = this.add.rectangle(80, 220, 35, 35, 0x29b6f6);
         this.add.text(80, 190, "슬레이어", { fontSize: '12px', fill: '#ffffff' }).setOrigin(0.5);
 
-        // [첫 번째 몬스터 생성]
-        this.spawnMonster();
-
-        // [자동 공격 타이머 등록]
-        this.startAutoAttackTimer();
-
-        // --- [하단 업그레이드 버튼 그룹] ---
+        // --- [하단 업그레이드 버튼 그룹 미리 생성] ---
         
         // 1. 공격력 강화 버튼
         this.btnAtkUpgrade = this.add.rectangle(200, 370, 360, 45, 0xd90429).setInteractive({ useHandCursor: true });
@@ -94,7 +87,7 @@ class MainScene extends Phaser.Scene {
         this.textCritUpgrade = this.add.text(200, 430, '', { fontSize: '15px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
 
         this.btnCritUpgrade.on('pointerdown', () => {
-            if (gameState.critRate >= 100) return; // 최대 100%
+            if (gameState.critRate >= 100) return;
             if (gameState.gold >= gameState.critRateCost) {
                 gameState.gold -= gameState.critRateCost;
                 gameState.critRate += 1;
@@ -109,49 +102,4 @@ class MainScene extends Phaser.Scene {
         this.textSpdUpgrade = this.add.text(200, 490, '', { fontSize: '15px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
 
         this.btnSpdUpgrade.on('pointerdown', () => {
-            if (gameState.atkSpeed <= 100) return; // 최소 쿨타임 100ms 제한
-            if (gameState.gold >= gameState.atkSpeedCost) {
-                gameState.gold -= gameState.atkSpeedCost;
-                gameState.atkSpeed = Math.max(100, gameState.atkSpeed - 30); // 30ms 단축
-                gameState.atkSpeedCost = Math.floor(gameState.atkSpeedCost * 1.7);
-                
-                // 공격 속도 변경 시 타이머 재설정
-                this.startAutoAttackTimer();
-                this.updateUI();
-                this.playBtnTween(this.btnSpdUpgrade);
-            }
-        });
-
-        this.updateUI();
-    }
-
-    // 자동 공격 타이머 재설정 함수
-    startAutoAttackTimer() {
-        if (this.attackTimer) this.attackTimer.destroy();
-        this.attackTimer = this.time.addEvent({
-            delay: gameState.atkSpeed,
-            callback: this.autoAttack,
-            callbackScope: this,
-            loop: true
-        });
-    }
-
-    // 버튼 클릭 피드백 애니메이션
-    playBtnTween(target) {
-        this.tweens.add({
-            targets: target,
-            scaleX: 0.95,
-            scaleY: 0.95,
-            duration: 50,
-            yoyo: true
-        });
-    }
-
-    // 몬스터 생성
-    spawnMonster() {
-        const hp = gameState.stage * 15;
-        this.currentMonster = {
-            sprite: this.add.rectangle(280, 220, 40, 40, 0xef233c),
-            hp: hp,
-            maxHp: hp,
-            hpText: this.add
+            if (gameState.
