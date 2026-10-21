@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>슬레이어 키우기 - 방치형 RPG</title>
-    <!-- 가장 안정적인 Phaser 3 CDN -->
+    <!-- Phaser 3 CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
     <style>
         body {
@@ -24,15 +24,23 @@
 <body>
 
 <script>
-// --- 1. 게임 전역 데이터 (단 1번만 선언) ---
+// --- 1. 게임 전역 데이터 (스탯 & 재화) ---
 const gameState = {
     gold: 0,
-    atk: 5,             // 주인공 공격력
-    atkCost: 10,        // 공격력 강화 비용
-    atkSpeed: 800,      // 공격 속도 (ms 단위)
-    stage: 1,           // 현재 스테이지
-    killCount: 0,       // 현재 스테이지 처치 수
-    maxKills: 5         // 다음 스테이지 진입에 필요한 처치 수
+    atk: 5,                 // 기본 공격력
+    atkCost: 10,            // 공격력 강화 비용
+    
+    critRate: 10,           // 치명타 확률 (%)
+    critRateCost: 20,       // 치명타 확률 강화 비용
+    
+    critDmg: 150,           // 치명타 데미지 (%)
+    
+    atkSpeed: 800,          // 공격 속도 (ms, 작을수록 빠름)
+    atkSpeedCost: 30,       // 공격 속도 강화 비용
+    
+    stage: 1,               // 현재 스테이지
+    killCount: 0,           // 현재 스테이지 처치 수
+    maxKills: 5             // 다음 스테이지 진입 처치 수
 };
 
 // --- 2. 메인 게임 씬 ---
@@ -43,157 +51,107 @@ class MainScene extends Phaser.Scene {
 
     create() {
         // [배경 영역 분리]
-        this.add.rectangle(200, 200, 400, 400, 0x1e1e24); // 상단 전투 필드
-        this.add.rectangle(200, 500, 400, 200, 0x2b2d42); // 하단 UI 영역
+        this.add.rectangle(200, 160, 400, 320, 0x1e1e24); // 상단 전투 필드
+        this.add.rectangle(200, 460, 400, 280, 0x2b2d42); // 하단 UI 영역
 
-        // [UI 텍스트 세팅]
-        this.stageText = this.add.text(200, 25, `STAGE ${gameState.stage} (${gameState.killCount}/${gameState.maxKills})`, { fontSize: '20px', fill: '#00e676', fontStyle: 'bold' }).setOrigin(0.5);
-        this.goldText = this.add.text(20, 60, `골드: ${gameState.gold} G`, { fontSize: '18px', fill: '#ffd700', fontStyle: 'bold' });
-        this.atkText = this.add.text(20, 85, `공격력: ${gameState.atk}`, { fontSize: '15px', fill: '#ffffff' });
+        // [상단 UI 텍스트]
+        this.stageText = this.add.text(200, 20, `STAGE ${gameState.stage} (${gameState.killCount}/${gameState.maxKills})`, { fontSize: '20px', fill: '#00e676', fontStyle: 'bold' }).setOrigin(0.5);
+        this.goldText = this.add.text(20, 50, `골드: ${gameState.gold} G`, { fontSize: '18px', fill: '#ffd700', fontStyle: 'bold' });
+        
+        // [스탯 정보 텍스트]
+        this.atkText = this.add.text(20, 80, `공격력: ${gameState.atk}`, { fontSize: '14px', fill: '#ffffff' });
+        this.critText = this.add.text(20, 100, `치명타: ${gameState.critRate}% (데미지 ${gameState.critDmg}%)`, { fontSize: '14px', fill: '#ffeb3b' });
+        this.spdText = this.add.text(20, 120, `공격속도: ${(1000 / gameState.atkSpeed).toFixed(2)}회/초`, { fontSize: '14px', fill: '#00e5ff' });
 
-        // [주인공 슬레이어 (파란색 박스)]
-        this.player = this.add.rectangle(80, 240, 35, 35, 0x29b6f6);
-        this.add.text(80, 210, "슬레이어", { fontSize: '12px', fill: '#ffffff' }).setOrigin(0.5);
+        // [주인공 슬레이어]
+        this.player = this.add.rectangle(80, 220, 35, 35, 0x29b6f6);
+        this.add.text(80, 190, "슬레이어", { fontSize: '12px', fill: '#ffffff' }).setOrigin(0.5);
 
         // [첫 번째 몬스터 생성]
         this.spawnMonster();
 
         // [자동 공격 타이머 등록]
-        this.attackTimer = this.time.addEvent({
-            delay: gameState.atkSpeed,
-            callback: this.autoAttack,
-            callbackScope: this,
-            loop: true
-        });
+        this.startAutoAttackTimer();
 
-        // [하단 공격력 강화 버튼]
-        this.btnAtkUpgrade = this.add.rectangle(200, 480, 360, 50, 0xd90429).setInteractive({ useHandCursor: true });
-        this.textAtkUpgrade = this.add.text(200, 480, `공격력 강화 (+2) - ${gameState.atkCost} G`, { fontSize: '16px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+        // --- [하단 업그레이드 버튼 그룹] ---
+        
+        // 1. 공격력 강화 버튼
+        this.btnAtkUpgrade = this.add.rectangle(200, 370, 360, 45, 0xd90429).setInteractive({ useHandCursor: true });
+        this.textAtkUpgrade = this.add.text(200, 370, '', { fontSize: '15px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
 
-        // 강화 버튼 클릭 처리
         this.btnAtkUpgrade.on('pointerdown', () => {
             if (gameState.gold >= gameState.atkCost) {
                 gameState.gold -= gameState.atkCost;
                 gameState.atk += 2;
                 gameState.atkCost = Math.floor(gameState.atkCost * 1.5);
                 this.updateUI();
-
-                // 버튼 누름 피드백 애니메이션
-                this.tweens.add({
-                    targets: this.btnAtkUpgrade,
-                    scaleX: 0.95,
-                    scaleY: 0.95,
-                    duration: 50,
-                    yoyo: true
-                });
+                this.playBtnTween(this.btnAtkUpgrade);
             }
+        });
+
+        // 2. 치명타 확률 강화 버튼
+        this.btnCritUpgrade = this.add.rectangle(200, 430, 360, 45, 0xf77f00).setInteractive({ useHandCursor: true });
+        this.textCritUpgrade = this.add.text(200, 430, '', { fontSize: '15px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+
+        this.btnCritUpgrade.on('pointerdown', () => {
+            if (gameState.critRate >= 100) return; // 최대 100%
+            if (gameState.gold >= gameState.critRateCost) {
+                gameState.gold -= gameState.critRateCost;
+                gameState.critRate += 1;
+                gameState.critRateCost = Math.floor(gameState.critRateCost * 1.6);
+                this.updateUI();
+                this.playBtnTween(this.btnCritUpgrade);
+            }
+        });
+
+        // 3. 공격 속도 강화 버튼
+        this.btnSpdUpgrade = this.add.rectangle(200, 490, 360, 45, 0x00b4d8).setInteractive({ useHandCursor: true });
+        this.textSpdUpgrade = this.add.text(200, 490, '', { fontSize: '15px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+
+        this.btnSpdUpgrade.on('pointerdown', () => {
+            if (gameState.atkSpeed <= 100) return; // 최소 쿨타임 100ms 제한
+            if (gameState.gold >= gameState.atkSpeedCost) {
+                gameState.gold -= gameState.atkSpeedCost;
+                gameState.atkSpeed = Math.max(100, gameState.atkSpeed - 30); // 30ms 단축
+                gameState.atkSpeedCost = Math.floor(gameState.atkSpeedCost * 1.7);
+                
+                // 공격 속도 변경 시 타이머 재설정
+                this.startAutoAttackTimer();
+                this.updateUI();
+                this.playBtnTween(this.btnSpdUpgrade);
+            }
+        });
+
+        this.updateUI();
+    }
+
+    // 자동 공격 타이머 재설정 함수
+    startAutoAttackTimer() {
+        if (this.attackTimer) this.attackTimer.destroy();
+        this.attackTimer = this.time.addEvent({
+            delay: gameState.atkSpeed,
+            callback: this.autoAttack,
+            callbackScope: this,
+            loop: true
         });
     }
 
-    // 몬스터 생성 기능
+    // 버튼 클릭 피드백 애니메이션
+    playBtnTween(target) {
+        this.tweens.add({
+            targets: target,
+            scaleX: 0.95,
+            scaleY: 0.95,
+            duration: 50,
+            yoyo: true
+        });
+    }
+
+    // 몬스터 생성
     spawnMonster() {
         const hp = gameState.stage * 15;
         this.currentMonster = {
-            sprite: this.add.rectangle(280, 240, 40, 40, 0xef233c),
+            sprite: this.add.rectangle(280, 220, 40, 40, 0xef233c),
             hp: hp,
             maxHp: hp,
-            hpText: this.add.text(280, 210, `HP: ${hp}`, { fontSize: '12px', fill: '#ff8a80' }).setOrigin(0.5)
-        };
-    }
-
-    // 주인공 자동 공격 메커니즘
-    autoAttack() {
-        if (!this.currentMonster || this.currentMonster.hp <= 0) return;
-
-        // 검기 투사체 생성 및 이동
-        const slash = this.add.rectangle(this.player.x + 20, this.player.y, 20, 6, 0x00e5ff);
-        
-        this.tweens.add({
-            targets: slash,
-            x: this.currentMonster.sprite.x,
-            duration: 120,
-            onComplete: () => {
-                slash.destroy();
-                this.damageMonster(gameState.atk);
-            }
-        });
-    }
-
-    // 데미지 계산 및 이펙트
-    damageMonster(amount) {
-        if (!this.currentMonster) return;
-
-        this.currentMonster.hp -= amount;
-
-        // 데미지 텍스트 팝업
-        const dmgText = this.add.text(this.currentMonster.sprite.x + Phaser.Math.Between(-10, 10), 180, `-${amount}`, { fontSize: '18px', fill: '#ffeb3b', fontStyle: 'bold' }).setOrigin(0.5);
-        this.tweens.add({
-            targets: dmgText,
-            y: 140,
-            alpha: 0,
-            duration: 400,
-            onComplete: () => dmgText.destroy()
-        });
-
-        // 몬스터 체력 처리
-        if (this.currentMonster.hp > 0) {
-            this.currentMonster.hpText.setText(`HP: ${this.currentMonster.hp}`);
-        } else {
-            this.killMonster();
-        }
-
-        this.updateUI();
-    }
-
-    // 몬스터 처치 및 다음 몬스터 처리
-    killMonster() {
-        gameState.gold += gameState.stage * 8;
-        gameState.killCount += 1;
-
-        if (this.currentMonster) {
-            this.currentMonster.sprite.destroy();
-            this.currentMonster.hpText.destroy();
-            this.currentMonster = null;
-        }
-
-        // 스테이지 상승 체크
-        if (gameState.killCount >= gameState.maxKills) {
-            gameState.stage += 1;
-            gameState.killCount = 0;
-        }
-
-        this.updateUI();
-
-        // 0.3초 후 다음 몬스터 스폰
-        this.time.delayedCall(300, () => {
-            this.spawnMonster();
-        });
-    }
-
-    // UI 동기화
-    updateUI() {
-        this.stageText.setText(`STAGE ${gameState.stage} (${gameState.killCount}/${gameState.maxKills})`);
-        this.goldText.setText(`골드: ${gameState.gold} G`);
-        this.atkText.setText(`공격력: ${gameState.atk}`);
-        this.textAtkUpgrade.setText(`공격력 강화 (+2) - ${gameState.atkCost} G`);
-    }
-}
-
-// --- 3. Phaser 실행 설정 ---
-const config = {
-    type: Phaser.AUTO,
-    width: 400,
-    height: 600,
-    backgroundColor: '#0d0d11',
-    scene: MainScene,
-    scale: {
-        mode: Phaser.Scale.FIT,
-        autoCenter: Phaser.Scale.CENTER_BOTH
-    }
-};
-
-const game = new Phaser.Game(config);
-</script>
-
-</body>
-</html>
+            hpText: this.add
