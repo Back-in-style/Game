@@ -24,11 +24,11 @@
 <body>
 
 <script>
-// --- 1. 게임 전역 데이터 구조 (휘발성 vs 영구 데이터 분리) ---
+// --- 1. 게임 전역 데이터 구조 ---
 const gameState = {
     // [휘발성 재화 및 일반 레벨] (환생 시 초기화)
     gold: 0,
-    atkLevel: 1,            // 일반 공격력 강화 레벨
+    atkLevel: 1,            // 일반 공격력 레벨
     critRateLevel: 0,       // 일반 치명타 확률 레벨
     atkSpeedLevel: 0,       // 일반 공격속도 레벨
     
@@ -38,57 +38,43 @@ const gameState = {
 
     // [영구 재화 및 영구 버프] (환생해도 유지)
     rebirthStone: 0,        // 보유 환생석
-    permAtkLevel: 0,        // 영구 공격력 증가 레벨 (1레벨당 +10%)
-    permGoldLevel: 0,       // 영구 골드 획득량 레벨 (1레벨당 +15%)
+    permAtkLevel: 0,        // 영구 공격력 레벨 (+10% / 레벨)
+    permGoldLevel: 0,       // 영구 골드 레벨 (+15% / 레벨)
 
-    // [기본 고정 수치]
+    // UI 상태
+    currentTab: 'normal',   // 'normal' 또는 'rebirth'
+
+    // [기본 수치]
     baseAtk: 5,
     baseCritRate: 10,
     baseCritDmg: 150,
     baseAtkSpeed: 800
 };
 
-// --- [계산식 보조 함수들 (Exponential Scaling)] ---
-function getAtkCost() {
-    return Math.floor(10 * Math.pow(1.12, gameState.atkLevel - 1));
-}
+// --- [계산식 보조 함수들] ---
+function getAtkCost() { return Math.floor(10 * Math.pow(1.12, gameState.atkLevel - 1)); }
+function getCritCost() { return Math.floor(20 * Math.pow(1.6, gameState.critRateLevel)); }
+function getSpdCost() { return Math.floor(30 * Math.pow(1.7, gameState.atkSpeedLevel)); }
 
-function getCritCost() {
-    return Math.floor(20 * Math.pow(1.6, gameState.critRateLevel));
-}
+// 영구 강화 비용 (환생석)
+function getPermAtkCost() { return Math.floor(1 * Math.pow(1.5, gameState.permAtkLevel)); }
+function getPermGoldCost() { return Math.floor(1 * Math.pow(1.5, gameState.permGoldLevel)); }
 
-function getSpdCost() {
-    return Math.floor(30 * Math.pow(1.7, gameState.atkSpeedLevel));
-}
-
-// 최종 스탯 계산 (기본 + 일반 강화) * (1 + 영구 버프 %)
+// 최종 수치 계산식
 function getFinalAtk() {
     const normalAtk = gameState.baseAtk + (gameState.atkLevel - 1) * 2;
-    const permBuff = 1 + (gameState.permAtkLevel * 0.10); // 레벨당 10%
+    const permBuff = 1 + (gameState.permAtkLevel * 0.10);
     return Math.floor(normalAtk * permBuff);
 }
+function getFinalCritRate() { return Math.min(100, gameState.baseCritRate + gameState.critRateLevel); }
+function getFinalAtkSpeed() { return Math.max(100, gameState.baseAtkSpeed - (gameState.atkSpeedLevel * 30)); }
 
-function getFinalCritRate() {
-    return Math.min(100, gameState.baseCritRate + gameState.critRateLevel);
-}
-
-function getFinalAtkSpeed() {
-    return Math.max(100, gameState.baseAtkSpeed - (gameState.atkSpeedLevel * 30));
-}
-
-// 몬스터 체력 (정통 방치형 15% 기하급수 상승)
-function getMonsterMaxHp(stage) {
-    return Math.floor(15 * Math.pow(1.15, stage - 1));
-}
-
-// 몬스터 처치 골드
+function getMonsterMaxHp(stage) { return Math.floor(15 * Math.pow(1.15, stage - 1)); }
 function getMonsterGold(stage) {
     const baseGold = stage * 8;
-    const permBuff = 1 + (gameState.permGoldLevel * 0.15); // 레벨당 15%
+    const permBuff = 1 + (gameState.permGoldLevel * 0.15);
     return Math.floor(baseGold * permBuff);
 }
-
-// 환생 보상 계산 공식 (10스테이지 이상부터 획득)
 function getRebirthReward() {
     if (gameState.stage < 10) return 0;
     return Math.floor(Math.pow(gameState.stage / 10, 1.5));
@@ -103,29 +89,38 @@ class MainScene extends Phaser.Scene {
 
     create() {
         // [1] 배경 영역
-        this.add.rectangle(200, 150, 400, 300, 0x1e1e24); // 상단 전투 필드
-        this.add.rectangle(200, 450, 400, 300, 0x2b2d42); // 하단 UI 및 강화 영역
+        this.add.rectangle(200, 140, 400, 280, 0x1e1e24); // 상단 전투 필드
+        this.add.rectangle(200, 440, 400, 320, 0x2b2d42); // 하단 UI 영역
 
         // [2] 상단 UI 텍스트
-        this.stageText = this.add.text(200, 20, '', { fontSize: '20px', fill: '#00e676', fontStyle: 'bold' }).setOrigin(0.5);
-        this.goldText = this.add.text(20, 50, '', { fontSize: '16px', fill: '#ffd700', fontStyle: 'bold' });
-        this.rebirthStoneText = this.add.text(20, 72, '', { fontSize: '16px', fill: '#e040fb', fontStyle: 'bold' });
+        this.stageText = this.add.text(200, 15, '', { fontSize: '18px', fill: '#00e676', fontStyle: 'bold' }).setOrigin(0.5);
+        this.goldText = this.add.text(20, 40, '', { fontSize: '15px', fill: '#ffd700', fontStyle: 'bold' });
+        this.rebirthStoneText = this.add.text(20, 60, '', { fontSize: '15px', fill: '#e040fb', fontStyle: 'bold' });
         
         // [3] 스탯 정보 텍스트
-        this.atkText = this.add.text(20, 98, '', { fontSize: '13px', fill: '#ffffff' });
-        this.critText = this.add.text(20, 116, '', { fontSize: '13px', fill: '#ffeb3b' });
-        this.spdText = this.add.text(20, 134, '', { fontSize: '13px', fill: '#00e5ff' });
+        this.atkText = this.add.text(20, 82, '', { fontSize: '12px', fill: '#ffffff' });
+        this.critText = this.add.text(20, 98, '', { fontSize: '12px', fill: '#ffeb3b' });
+        this.spdText = this.add.text(20, 114, '', { fontSize: '12px', fill: '#00e5ff' });
 
         // [4] 주인공 용사
-        this.player = this.add.rectangle(80, 220, 35, 35, 0x29b6f6);
-        this.add.text(80, 190, "용사", { fontSize: '12px', fill: '#ffffff' }).setOrigin(0.5);
+        this.player = this.add.rectangle(80, 200, 35, 35, 0x29b6f6);
+        this.add.text(80, 170, "용사", { fontSize: '12px', fill: '#ffffff' }).setOrigin(0.5);
 
-        // [5] 하단 업그레이드 & 환생 버튼 그룹
-        
-        // 1) 공격력 강화 버튼 (골드)
-        this.btnAtkUpgrade = this.add.rectangle(200, 340, 360, 40, 0xd90429).setInteractive({ useHandCursor: true });
-        this.textAtkUpgrade = this.add.text(200, 340, '', { fontSize: '14px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+        // --- [5] 하단 탭 버튼 (일반 강화 vs 환생/영구 강화) ---
+        this.tabNormalBtn = this.add.rectangle(100, 295, 190, 30, 0x3d405b).setInteractive({ useHandCursor: true });
+        this.tabNormalText = this.add.text(100, 295, "⚔️ 일반 강화", { fontSize: '14px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
 
+        this.tabRebirthBtn = this.add.rectangle(300, 295, 190, 30, 0x3d405b).setInteractive({ useHandCursor: true });
+        this.tabRebirthText = this.add.text(300, 295, "🌀 환생 & 영구강화", { fontSize: '14px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+
+        this.tabNormalBtn.on('pointerdown', () => { gameState.currentTab = 'normal'; this.updateUI(); });
+        this.tabRebirthBtn.on('pointerdown', () => { gameState.currentTab = 'rebirth'; this.updateUI(); });
+
+        // --- [6] 강화 버튼 그룹 생성 ---
+
+        // A. 일반 강화 버튼 3종
+        this.btnAtkUpgrade = this.add.rectangle(200, 350, 360, 40, 0xd90429).setInteractive({ useHandCursor: true });
+        this.textAtkUpgrade = this.add.text(200, 350, '', { fontSize: '14px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
         this.btnAtkUpgrade.on('pointerdown', () => {
             const cost = getAtkCost();
             if (gameState.gold >= cost) {
@@ -136,10 +131,8 @@ class MainScene extends Phaser.Scene {
             }
         });
 
-        // 2) 치명타 확률 강화 버튼 (골드)
-        this.btnCritUpgrade = this.add.rectangle(200, 390, 360, 40, 0xf77f00).setInteractive({ useHandCursor: true });
-        this.textCritUpgrade = this.add.text(200, 390, '', { fontSize: '14px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-
+        this.btnCritUpgrade = this.add.rectangle(200, 400, 360, 40, 0xf77f00).setInteractive({ useHandCursor: true });
+        this.textCritUpgrade = this.add.text(200, 400, '', { fontSize: '14px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
         this.btnCritUpgrade.on('pointerdown', () => {
             if (getFinalCritRate() >= 100) return;
             const cost = getCritCost();
@@ -151,30 +144,48 @@ class MainScene extends Phaser.Scene {
             }
         });
 
-        // 3) 공격 속도 강화 버튼 (골드)
-        this.btnSpdUpgrade = this.add.rectangle(200, 440, 360, 40, 0x00b4d8).setInteractive({ useHandCursor: true });
-        this.textSpdUpgrade = this.add.text(200, 440, '', { fontSize: '14px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-
+        this.btnSpdUpgrade = this.add.rectangle(200, 450, 360, 40, 0x00b4d8).setInteractive({ useHandCursor: true });
+        this.textSpdUpgrade = this.add.text(200, 450, '', { fontSize: '14px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
         this.btnSpdUpgrade.on('pointerdown', () => {
             if (getFinalAtkSpeed() <= 100) return;
             const cost = getSpdCost();
             if (gameState.gold >= cost) {
                 gameState.gold -= cost;
                 gameState.atkSpeedLevel += 1;
-                
                 this.startAutoAttackTimer();
                 this.updateUI();
                 this.playBtnTween(this.btnSpdUpgrade);
             }
         });
 
-        // 4) 핵심 [환생하기] 버튼
-        this.btnRebirth = this.add.rectangle(200, 520, 360, 50, 0xaa00ff).setInteractive({ useHandCursor: true });
-        this.textRebirth = this.add.text(200, 520, '', { fontSize: '16px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-
-        this.btnRebirth.on('pointerdown', () => {
-            this.executeRebirth();
+        // B. 환생 & 영구 강화 버튼 그룹
+        this.btnPermAtkUpgrade = this.add.rectangle(200, 350, 360, 40, 0x7209b7).setInteractive({ useHandCursor: true });
+        this.textPermAtkUpgrade = this.add.text(200, 350, '', { fontSize: '14px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+        this.btnPermAtkUpgrade.on('pointerdown', () => {
+            const cost = getPermAtkCost();
+            if (gameState.rebirthStone >= cost) {
+                gameState.rebirthStone -= cost;
+                gameState.permAtkLevel += 1;
+                this.updateUI();
+                this.playBtnTween(this.btnPermAtkUpgrade);
+            }
         });
+
+        this.btnPermGoldUpgrade = this.add.rectangle(200, 400, 360, 40, 0x3a0ca3).setInteractive({ useHandCursor: true });
+        this.textPermGoldUpgrade = this.add.text(200, 400, '', { fontSize: '14px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+        this.btnPermGoldUpgrade.on('pointerdown', () => {
+            const cost = getPermGoldCost();
+            if (gameState.rebirthStone >= cost) {
+                gameState.rebirthStone -= cost;
+                gameState.permGoldLevel += 1;
+                this.updateUI();
+                this.playBtnTween(this.btnPermGoldUpgrade);
+            }
+        });
+
+        this.btnRebirth = this.add.rectangle(200, 520, 360, 50, 0xaa00ff).setInteractive({ useHandCursor: true });
+        this.textRebirth = this.add.text(200, 520, '', { fontSize: '15px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+        this.btnRebirth.on('pointerdown', () => { this.executeRebirth(); });
 
         // 시작 실행
         this.updateUI();
@@ -182,7 +193,7 @@ class MainScene extends Phaser.Scene {
         this.startAutoAttackTimer();
     }
 
-    // 환생 실행 메커니즘
+    // 환생 처리
     executeRebirth() {
         const reward = getRebirthReward();
         if (reward <= 0) {
@@ -190,11 +201,10 @@ class MainScene extends Phaser.Scene {
             return;
         }
 
-        if (confirm(`환생하시겠습니까?\n\n[환생 보상]: 환생석 +${reward}개\n* 스테이지, 골드, 일반 강화 수치는 초기화됩니다.`)) {
-            // 1. 영구 재화 지급
+        if (confirm(`환생하시겠습니까?\n\n[환생 보상]: 환생석 +${reward}개\n* 스테이지, 골드, 일반 강화 레벨이 초기화됩니다.`)) {
             gameState.rebirthStone += reward;
 
-            // 2. 휘발성 데이터 초기화
+            // 휘발성 데이터 초기화
             gameState.gold = 0;
             gameState.atkLevel = 1;
             gameState.critRateLevel = 0;
@@ -202,18 +212,15 @@ class MainScene extends Phaser.Scene {
             gameState.stage = 1;
             gameState.killCount = 0;
 
-            // 3. 현재 필드 몬스터 제거 및 재생성
             if (this.currentMonster) {
                 this.currentMonster.sprite.destroy();
                 this.currentMonster.hpText.destroy();
                 this.currentMonster = null;
             }
 
-            // 4. 타이머 및 UI 재설정
             this.startAutoAttackTimer();
             this.updateUI();
             this.spawnMonster();
-
             this.playBtnTween(this.btnRebirth);
         }
     }
@@ -244,10 +251,10 @@ class MainScene extends Phaser.Scene {
     spawnMonster() {
         const hp = getMonsterMaxHp(gameState.stage);
         this.currentMonster = {
-            sprite: this.add.rectangle(280, 220, 40, 40, 0xef233c),
+            sprite: this.add.rectangle(280, 200, 40, 40, 0xef233c),
             hp: hp,
             maxHp: hp,
-            hpText: this.add.text(280, 190, `HP: ${hp}`, { fontSize: '12px', fill: '#ff8a80' }).setOrigin(0.5)
+            hpText: this.add.text(280, 170, `HP: ${hp}`, { fontSize: '12px', fill: '#ff8a80' }).setOrigin(0.5)
         };
     }
 
@@ -283,18 +290,17 @@ class MainScene extends Phaser.Scene {
         const dmgColor = isCrit ? '#ff1744' : '#ffeb3b';
         const dmgTextStr = isCrit ? `💥 ${amount}!` : `-${amount}`;
         const fontSize = isCrit ? '22px' : '16px';
-        const offsetX = Math.floor(Math.random() * 20) - 10;
 
         const dmgText = this.add.text(
-            this.currentMonster.sprite.x + offsetX, 
-            160, 
+            this.currentMonster.sprite.x + Math.floor(Math.random() * 20 - 10), 
+            140, 
             dmgTextStr, 
             { fontSize: fontSize, fill: dmgColor, fontStyle: 'bold' }
         ).setOrigin(0.5);
 
         this.tweens.add({
             targets: dmgText,
-            y: 120,
+            y: 100,
             alpha: 0,
             duration: isCrit ? 600 : 400,
             onComplete: () => dmgText.destroy()
@@ -334,36 +340,59 @@ class MainScene extends Phaser.Scene {
     updateUI() {
         if (!this.stageText) return;
 
+        // 상단 스탯
         this.stageText.setText(`STAGE ${gameState.stage} (${gameState.killCount}/${gameState.maxKills})`);
         this.goldText.setText(`골드: ${gameState.gold.toLocaleString()} G`);
         this.rebirthStoneText.setText(`환생석: ${gameState.rebirthStone.toLocaleString()} 개`);
 
-        this.atkText.setText(`공격력: ${getFinalAtk()} (Lv.${gameState.atkLevel})`);
+        this.atkText.setText(`공격력: ${getFinalAtk()} (일반 Lv.${gameState.atkLevel} / 영구 +${gameState.permAtkLevel * 10}%)`);
         this.critText.setText(`치명타: ${getFinalCritRate()}% (Lv.${gameState.critRateLevel})`);
         this.spdText.setText(`공격속도: ${(1000 / getFinalAtkSpeed()).toFixed(2)}회/초 (Lv.${gameState.atkSpeedLevel})`);
 
-        // 버튼 텍스트 업데이트
-        this.textAtkUpgrade.setText(`공격력 강화 - ${getAtkCost().toLocaleString()} G`);
-        
-        if (getFinalCritRate() >= 100) {
-            this.textCritUpgrade.setText(`치명타 확률 강화 - MAX`);
+        // 탭 스타일 전환
+        if (gameState.currentTab === 'normal') {
+            this.tabNormalBtn.setFillStyle(0x4cc9f0);
+            this.tabRebirthBtn.setFillStyle(0x3d405b);
+
+            // 일반 강화 활성화
+            this.btnAtkUpgrade.setVisible(true); this.textAtkUpgrade.setVisible(true);
+            this.btnCritUpgrade.setVisible(true); this.textCritUpgrade.setVisible(true);
+            this.btnSpdUpgrade.setVisible(true); this.textSpdUpgrade.setVisible(true);
+
+            // 영구 강화 비활성화
+            this.btnPermAtkUpgrade.setVisible(false); this.textPermAtkUpgrade.setVisible(false);
+            this.btnPermGoldUpgrade.setVisible(false); this.textPermGoldUpgrade.setVisible(false);
+
+            // 버튼 텍스트
+            this.textAtkUpgrade.setText(`공격력 강화 - ${getAtkCost().toLocaleString()} G`);
+            this.textCritUpgrade.setText(getFinalCritRate() >= 100 ? `치명타 확률 - MAX` : `치명타 확률 강화 - ${getCritCost().toLocaleString()} G`);
+            this.textSpdUpgrade.setText(getFinalAtkSpeed() <= 100 ? `공격 속도 - MAX` : `공격 속도 강화 - ${getSpdCost().toLocaleString()} G`);
+
         } else {
-            this.textCritUpgrade.setText(`치명타 확률 강화 - ${getCritCost().toLocaleString()} G`);
+            this.tabNormalBtn.setFillStyle(0x3d405b);
+            this.tabRebirthBtn.setFillStyle(0x7209b7);
+
+            // 일반 강화 비활성화
+            this.btnAtkUpgrade.setVisible(false); this.textAtkUpgrade.setVisible(false);
+            this.btnCritUpgrade.setVisible(false); this.textCritUpgrade.setVisible(false);
+            this.btnSpdUpgrade.setVisible(false); this.textSpdUpgrade.setVisible(false);
+
+            // 영구 강화 활성화
+            this.btnPermAtkUpgrade.setVisible(true); this.textPermAtkUpgrade.setVisible(true);
+            this.btnPermGoldUpgrade.setVisible(true); this.textPermGoldUpgrade.setVisible(true);
+
+            // 버튼 텍스트
+            this.textPermAtkUpgrade.setText(`영구 공격력 (+10%) - ${getPermAtkCost()} 환생석 (Lv.${gameState.permAtkLevel})`);
+            this.textPermGoldUpgrade.setText(`영구 골드 획득량 (+15%) - ${getPermGoldCost()} 환생석 (Lv.${gameState.permGoldLevel})`);
         }
 
-        if (getFinalAtkSpeed() <= 100) {
-            this.textSpdUpgrade.setText(`공격 속도 강화 - MAX`);
-        } else {
-            this.textSpdUpgrade.setText(`공격 속도 강화 - ${getSpdCost().toLocaleString()} G`);
-        }
-
-        // 환생 버튼 텍스트
+        // 환생 버튼 업데이트
         const reward = getRebirthReward();
         if (reward > 0) {
             this.textRebirth.setText(`🌀 환생하기 (+${reward.toLocaleString()} 환생석)`);
             this.btnRebirth.setFillStyle(0xaa00ff);
         } else {
-            this.textRebirth.setText(`🌀 환생 불가 (10 스테이지부터 가능)`);
+            this.textRebirth.setText(`🌀 환생 불가 (10 스테이지 이상부터 가능)`);
             this.btnRebirth.setFillStyle(0x555555);
         }
     }
