@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>환생용사 방치하기 v0.3.1 - Phaser 3 RPG</title>
+    <title>환생용사 방치하기 v0.4.0 - Phaser 3 RPG</title>
     <!-- Phaser 3 CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
     <style>
@@ -26,7 +26,10 @@
 <script>
 // --- 1. 게임 전역 데이터 구조 ---
 const gameState = {
-    version: "v0.3.1",
+    version: "v0.4.0",
+
+    // [용사 상태 관리]
+    playerState: 'WALKING', // 'WALKING' (달리기) | 'ATTACKING' (전투 중)
 
     // [휘발성 재화 및 일반 레벨] (환생 시 초기화)
     gold: 0,
@@ -78,7 +81,7 @@ function getFinalAtkSpeed() { return Math.max(100, gameState.baseAtkSpeed - (gam
 
 function getMonsterMaxHp(stage, isBoss) {
     const baseHp = Math.floor(15 * Math.pow(1.15, stage - 1));
-    return isBoss ? baseHp * 5 : baseHp; // 보스는 일반 몬스터 체력의 5배
+    return isBoss ? baseHp * 5 : baseHp;
 }
 function getMonsterGold(stage, isBoss) {
     const baseGold = stage * 8;
@@ -100,10 +103,19 @@ class MainScene extends Phaser.Scene {
 
     create() {
         // [1] 배경 영역
-        this.add.rectangle(200, 140, 400, 280, 0x1e1e24); // 상단 전투 필드
+        this.add.rectangle(200, 140, 400, 280, 0x1e1e24); // 상단 전투 필드 배경
         this.add.rectangle(200, 440, 400, 320, 0x2b2d42); // 하단 UI 영역
 
-        // [2] 상단 UI 텍스트 (버전 표시 추가)
+        // [배경 스크롤용 패턴 타일 생성]
+        const bgGraphics = this.make.graphics({ x: 0, y: 0, add: false });
+        bgGraphics.lineStyle(1, 0x2a2a35, 0.8);
+        bgGraphics.strokeRect(0, 0, 40, 40);
+        bgGraphics.generateTexture('bgGrid', 40, 40);
+        
+        this.bgTile = this.add.tileSprite(200, 140, 400, 280, 'bgGrid');
+        this.groundLine = this.add.rectangle(200, 225, 400, 4, 0x3d405b); // 바닥 선
+
+        // [2] 상단 UI 텍스트
         this.versionText = this.add.text(390, 10, gameState.version, { fontSize: '10px', fill: '#888888' }).setOrigin(1, 0);
         this.stageText = this.add.text(200, 15, '', { fontSize: '18px', fill: '#00e676', fontStyle: 'bold' }).setOrigin(0.5);
         this.goldText = this.add.text(20, 40, '', { fontSize: '15px', fill: '#ffd700', fontStyle: 'bold' });
@@ -114,7 +126,7 @@ class MainScene extends Phaser.Scene {
         this.critText = this.add.text(20, 98, '', { fontSize: '12px', fill: '#ffeb3b' });
         this.spdText = this.add.text(20, 114, '', { fontSize: '12px', fill: '#00e5ff' });
 
-        // [4] 보스전 타이머 UI (객체 먼저 안전 생성)
+        // [4] 보스전 타이머 UI
         this.bossTimerText = this.add.text(200, 45, '', { fontSize: '16px', fill: '#ff1744', fontStyle: 'bold' }).setOrigin(0.5).setVisible(false);
         this.bossTimerBg = this.add.rectangle(200, 65, 200, 8, 0x555555).setVisible(false);
         this.bossTimerBar = this.add.rectangle(200, 65, 200, 8, 0xff1744).setVisible(false);
@@ -130,7 +142,16 @@ class MainScene extends Phaser.Scene {
 
         // [5] 주인공 용사
         this.player = this.add.rectangle(80, 200, 35, 35, 0x29b6f6);
-        this.add.text(80, 170, "용사", { fontSize: '12px', fill: '#ffffff' }).setOrigin(0.5);
+        this.playerLabel = this.add.text(80, 170, "용사", { fontSize: '12px', fill: '#ffffff' }).setOrigin(0.5);
+
+        // 용사 상하 바운싱 (걷는 애니메이션 연출)
+        this.playerBounceTween = this.tweens.add({
+            targets: [this.player, this.playerLabel],
+            y: '-=4',
+            duration: 200,
+            yoyo: true,
+            repeat: -1
+        });
 
         // --- [6] 하단 탭 버튼 ---
         this.tabNormalBtn = this.add.rectangle(100, 295, 190, 30, 0x3d405b).setInteractive({ useHandCursor: true });
@@ -218,6 +239,13 @@ class MainScene extends Phaser.Scene {
         this.startAutoAttackTimer();
     }
 
+    // 프레임 업데이트 루프 (배경 스크롤)
+    update() {
+        if (gameState.playerState === 'WALKING' && this.bgTile) {
+            this.bgTile.tilePositionX += 2.5; // 배경을 뒤로 움직여 앞으로 달리는 연출
+        }
+    }
+
     // 스테이지 진입 및 보스전 판정
     startStage() {
         if (this.bossCountdownTimer) {
@@ -264,7 +292,7 @@ class MainScene extends Phaser.Scene {
             }
         }
 
-        this.spawnMonster();
+        this.spawnMonsterWithApproach();
         this.updateUI();
     }
 
@@ -300,8 +328,8 @@ class MainScene extends Phaser.Scene {
         gameState.killCount = 0;
 
         if (this.currentMonster) {
-            this.currentMonster.sprite.destroy();
-            this.currentMonster.hpText.destroy();
+            if (this.currentMonster.sprite) this.currentMonster.sprite.destroy();
+            if (this.currentMonster.hpText) this.currentMonster.hpText.destroy();
             this.currentMonster = null;
         }
 
@@ -336,8 +364,8 @@ class MainScene extends Phaser.Scene {
             gameState.isBossFailed = false;
 
             if (this.currentMonster) {
-                this.currentMonster.sprite.destroy();
-                this.currentMonster.hpText.destroy();
+                if (this.currentMonster.sprite) this.currentMonster.sprite.destroy();
+                if (this.currentMonster.hpText) this.currentMonster.hpText.destroy();
                 this.currentMonster = null;
             }
 
@@ -370,23 +398,47 @@ class MainScene extends Phaser.Scene {
         });
     }
 
-    spawnMonster() {
+    // 몬스터 우측 스폰 및 용사 앞 접근 연출
+    spawnMonsterWithApproach() {
+        gameState.playerState = 'WALKING'; // 용사 전진 시작 (배경 스크롤 활성화)
+        if (this.playerBounceTween) this.playerBounceTween.resume();
+
         const isBoss = gameState.isBossStage;
         const hp = getMonsterMaxHp(gameState.stage, isBoss);
         
         const size = isBoss ? 60 : 40;
         const color = isBoss ? 0x9d0208 : 0xef233c;
 
+        // 화면 우측 밖(X: 450)에서 생성
+        const monsterSprite = this.add.rectangle(450, 200, size, size, color);
+        const monsterHpText = this.add.text(450, 160, `HP: ${hp}`, { fontSize: '12px', fill: '#ff8a80' }).setOrigin(0.5);
+
         this.currentMonster = {
-            sprite: this.add.rectangle(280, 200, size, size, color),
+            sprite: monsterSprite,
             hp: hp,
             maxHp: hp,
-            hpText: this.add.text(280, 160, `HP: ${hp}`, { fontSize: '12px', fill: '#ff8a80' }).setOrigin(0.5)
+            hpText: monsterHpText,
+            isApproaching: true
         };
+
+        // 몬스터가 용사 앞(X: 280)으로 걸어오는 이동 연출 (0.5초)
+        this.tweens.add({
+            targets: [monsterSprite, monsterHpText],
+            x: 280,
+            duration: 500,
+            onComplete: () => {
+                if (this.currentMonster) {
+                    this.currentMonster.isApproaching = false;
+                }
+                gameState.playerState = 'ATTACKING'; // 전투 상태 전환 (배경 스크롤 정지)
+                if (this.playerBounceTween) this.playerBounceTween.pause();
+            }
+        });
     }
 
     autoAttack() {
-        if (!this.currentMonster || this.currentMonster.hp <= 0) return;
+        // 몬스터가 없거나 접근 중(이동 중)이면 공격 대기
+        if (!this.currentMonster || this.currentMonster.hp <= 0 || this.currentMonster.isApproaching) return;
 
         const isCrit = (Math.random() * 100) < getFinalCritRate();
         let finalDamage = getFinalAtk();
@@ -447,8 +499,8 @@ class MainScene extends Phaser.Scene {
         gameState.gold += getMonsterGold(gameState.stage, isBoss);
 
         if (this.currentMonster) {
-            this.currentMonster.sprite.destroy();
-            this.currentMonster.hpText.destroy();
+            if (this.currentMonster.sprite) this.currentMonster.sprite.destroy();
+            if (this.currentMonster.hpText) this.currentMonster.hpText.destroy();
             this.currentMonster = null;
         }
 
@@ -469,14 +521,13 @@ class MainScene extends Phaser.Scene {
             } else {
                 this.updateUI();
                 this.time.delayedCall(200, () => {
-                    this.spawnMonster();
+                    this.spawnMonsterWithApproach();
                 });
             }
         }
     }
 
     updateUI() {
-        // 객체 방어 코드
         if (!this.stageText || !this.btnAtkUpgrade) return;
 
         if (gameState.isBossStage) {
