@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>환생용사 방치하기 - Phaser 3 RPG</title>
+    <title>환생용사 방치하기 v0.3.1 - Phaser 3 RPG</title>
     <!-- Phaser 3 CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
     <style>
@@ -26,6 +26,8 @@
 <script>
 // --- 1. 게임 전역 데이터 구조 ---
 const gameState = {
+    version: "v0.3.1",
+
     // [휘발성 재화 및 일반 레벨] (환생 시 초기화)
     gold: 0,
     atkLevel: 1,            // 일반 공격력 레벨
@@ -101,7 +103,8 @@ class MainScene extends Phaser.Scene {
         this.add.rectangle(200, 140, 400, 280, 0x1e1e24); // 상단 전투 필드
         this.add.rectangle(200, 440, 400, 320, 0x2b2d42); // 하단 UI 영역
 
-        // [2] 상단 UI 텍스트
+        // [2] 상단 UI 텍스트 (버전 표시 추가)
+        this.versionText = this.add.text(390, 10, gameState.version, { fontSize: '10px', fill: '#888888' }).setOrigin(1, 0);
         this.stageText = this.add.text(200, 15, '', { fontSize: '18px', fill: '#00e676', fontStyle: 'bold' }).setOrigin(0.5);
         this.goldText = this.add.text(20, 40, '', { fontSize: '15px', fill: '#ffd700', fontStyle: 'bold' });
         this.rebirthStoneText = this.add.text(20, 60, '', { fontSize: '15px', fill: '#e040fb', fontStyle: 'bold' });
@@ -111,12 +114,12 @@ class MainScene extends Phaser.Scene {
         this.critText = this.add.text(20, 98, '', { fontSize: '12px', fill: '#ffeb3b' });
         this.spdText = this.add.text(20, 114, '', { fontSize: '12px', fill: '#00e5ff' });
 
-        // [4] 보스전 타이머 UI
+        // [4] 보스전 타이머 UI (객체 먼저 안전 생성)
         this.bossTimerText = this.add.text(200, 45, '', { fontSize: '16px', fill: '#ff1744', fontStyle: 'bold' }).setOrigin(0.5).setVisible(false);
         this.bossTimerBg = this.add.rectangle(200, 65, 200, 8, 0x555555).setVisible(false);
         this.bossTimerBar = this.add.rectangle(200, 65, 200, 8, 0xff1744).setVisible(false);
 
-        // 보스 재도전 버튼 (보스전 실패 후 후퇴 시 표시)
+        // 보스 재도전 버튼
         this.btnRetryBoss = this.add.rectangle(200, 265, 160, 25, 0xd90429).setInteractive({ useHandCursor: true }).setVisible(false);
         this.textRetryBoss = this.add.text(200, 265, "⚔️ 보스 재도전", { fontSize: '12px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setVisible(false);
         this.btnRetryBoss.on('pointerdown', () => {
@@ -211,31 +214,31 @@ class MainScene extends Phaser.Scene {
         this.btnRebirth.on('pointerdown', () => { this.executeRebirth(); });
 
         // 시작 실행
-        this.updateUI();
         this.startStage();
         this.startAutoAttackTimer();
     }
 
     // 스테이지 진입 및 보스전 판정
     startStage() {
-        // 기존 보스 타이머 제거
         if (this.bossCountdownTimer) {
             this.bossCountdownTimer.remove(false);
             this.bossCountdownTimer = null;
         }
 
-        // 10 스테이지 단위이고 보스전 실패 상태가 아니면 보스전 진입
         if (gameState.stage % 10 === 0 && !gameState.isBossFailed) {
             gameState.isBossStage = true;
             gameState.bossTimeLeft = 30;
 
-            this.bossTimerText.setVisible(true);
-            this.bossTimerBg.setVisible(true);
-            this.bossTimerBar.setVisible(true);
-            this.btnRetryBoss.setVisible(false);
-            this.textRetryBoss.setVisible(false);
+            if (this.bossTimerText) {
+                this.bossTimerText.setVisible(true);
+                this.bossTimerBg.setVisible(true);
+                this.bossTimerBar.setVisible(true);
+            }
+            if (this.btnRetryBoss) {
+                this.btnRetryBoss.setVisible(false);
+                this.textRetryBoss.setVisible(false);
+            }
 
-            // 1초마다 보스 타이머 감소
             this.bossCountdownTimer = this.time.addEvent({
                 delay: 1000,
                 callback: this.tickBossTimer,
@@ -244,16 +247,20 @@ class MainScene extends Phaser.Scene {
             });
         } else {
             gameState.isBossStage = false;
-            this.bossTimerText.setVisible(false);
-            this.bossTimerBg.setVisible(false);
-            this.bossTimerBar.setVisible(false);
+            if (this.bossTimerText) {
+                this.bossTimerText.setVisible(false);
+                this.bossTimerBg.setVisible(false);
+                this.bossTimerBar.setVisible(false);
+            }
 
-            if (gameState.isBossFailed) {
-                this.btnRetryBoss.setVisible(true);
-                this.textRetryBoss.setVisible(true);
-            } else {
-                this.btnRetryBoss.setVisible(false);
-                this.textRetryBoss.setVisible(false);
+            if (this.btnRetryBoss) {
+                if (gameState.isBossFailed) {
+                    this.btnRetryBoss.setVisible(true);
+                    this.textRetryBoss.setVisible(true);
+                } else {
+                    this.btnRetryBoss.setVisible(false);
+                    this.textRetryBoss.setVisible(false);
+                }
             }
         }
 
@@ -261,7 +268,6 @@ class MainScene extends Phaser.Scene {
         this.updateUI();
     }
 
-    // 보스 타이머 카운트다운
     tickBossTimer() {
         if (!gameState.isBossStage) return;
 
@@ -275,12 +281,12 @@ class MainScene extends Phaser.Scene {
     }
 
     updateBossTimerUI() {
+        if (!this.bossTimerText) return;
         this.bossTimerText.setText(`⚠️ BOSS TIME: ${gameState.bossTimeLeft}초`);
         const progress = gameState.bossTimeLeft / 30;
         this.bossTimerBar.width = 200 * progress;
     }
 
-    // 보스전 제한시간 초과 (실패 처리)
     failBossStage() {
         if (this.bossCountdownTimer) {
             this.bossCountdownTimer.remove(false);
@@ -290,7 +296,6 @@ class MainScene extends Phaser.Scene {
         gameState.isBossStage = false;
         gameState.isBossFailed = true;
 
-        // 이전 일반 스테이지로 후퇴
         gameState.stage -= 1;
         gameState.killCount = 0;
 
@@ -300,7 +305,6 @@ class MainScene extends Phaser.Scene {
             this.currentMonster = null;
         }
 
-        // 실패 알림 Floating Text
         const failText = this.add.text(200, 180, "❌ 보스 토벌 실패! 이전 스테이지로 후퇴합니다.", { fontSize: '13px', fill: '#ff1744', fontStyle: 'bold' }).setOrigin(0.5);
         this.tweens.add({
             targets: failText,
@@ -313,7 +317,6 @@ class MainScene extends Phaser.Scene {
         this.startStage();
     }
 
-    // 환생 처리
     executeRebirth() {
         const reward = getRebirthReward();
         if (reward <= 0) {
@@ -324,7 +327,6 @@ class MainScene extends Phaser.Scene {
         if (confirm(`환생하시겠습니까?\n\n[환생 보상]: 환생석 +${reward}개\n* 스테이지, 골드, 일반 강화 레벨이 초기화됩니다.`)) {
             gameState.rebirthStone += reward;
 
-            // 휘발성 데이터 초기화
             gameState.gold = 0;
             gameState.atkLevel = 1;
             gameState.critRateLevel = 0;
@@ -372,7 +374,6 @@ class MainScene extends Phaser.Scene {
         const isBoss = gameState.isBossStage;
         const hp = getMonsterMaxHp(gameState.stage, isBoss);
         
-        // 보스는 크기와 색상이 다름 (보라/붉은색, 크기 1.5배)
         const size = isBoss ? 60 : 40;
         const color = isBoss ? 0x9d0208 : 0xef233c;
 
@@ -451,7 +452,6 @@ class MainScene extends Phaser.Scene {
             this.currentMonster = null;
         }
 
-        // 보스 처치 성공 시 바로 다음 스테이지로 진행
         if (isBoss) {
             if (this.bossCountdownTimer) {
                 this.bossCountdownTimer.remove(false);
@@ -468,3 +468,87 @@ class MainScene extends Phaser.Scene {
                 this.startStage();
             } else {
                 this.updateUI();
+                this.time.delayedCall(200, () => {
+                    this.spawnMonster();
+                });
+            }
+        }
+    }
+
+    updateUI() {
+        // 객체 방어 코드
+        if (!this.stageText || !this.btnAtkUpgrade) return;
+
+        if (gameState.isBossStage) {
+            this.stageText.setText(`⚠️ STAGE ${gameState.stage} [BOSS] ⚠️`);
+            this.updateBossTimerUI();
+        } else {
+            this.stageText.setText(`STAGE ${gameState.stage} (${gameState.killCount}/${gameState.maxKills})`);
+        }
+
+        this.goldText.setText(`골드: ${gameState.gold.toLocaleString()} G`);
+        this.rebirthStoneText.setText(`환생석: ${gameState.rebirthStone.toLocaleString()} 개`);
+
+        this.atkText.setText(`공격력: ${getFinalAtk()} (일반 Lv.${gameState.atkLevel} / 영구 +${gameState.permAtkLevel * 10}%)`);
+        this.critText.setText(`치명타: ${getFinalCritRate()}% (Lv.${gameState.critRateLevel})`);
+        this.spdText.setText(`공격속도: ${(1000 / getFinalAtkSpeed()).toFixed(2)}회/초 (Lv.${gameState.atkSpeedLevel})`);
+
+        if (gameState.currentTab === 'normal') {
+            this.tabNormalBtn.setFillStyle(0x4cc9f0);
+            this.tabRebirthBtn.setFillStyle(0x3d405b);
+
+            this.btnAtkUpgrade.setVisible(true); this.textAtkUpgrade.setVisible(true);
+            this.btnCritUpgrade.setVisible(true); this.textCritUpgrade.setVisible(true);
+            this.btnSpdUpgrade.setVisible(true); this.textSpdUpgrade.setVisible(true);
+
+            this.btnPermAtkUpgrade.setVisible(false); this.textPermAtkUpgrade.setVisible(false);
+            this.btnPermGoldUpgrade.setVisible(false); this.textPermGoldUpgrade.setVisible(false);
+
+            this.textAtkUpgrade.setText(`공격력 강화 - ${getAtkCost().toLocaleString()} G`);
+            this.textCritUpgrade.setText(getFinalCritRate() >= 100 ? `치명타 확률 - MAX` : `치명타 확률 강화 - ${getCritCost().toLocaleString()} G`);
+            this.textSpdUpgrade.setText(getFinalAtkSpeed() <= 100 ? `공격 속도 - MAX` : `공격 속도 강화 - ${getSpdCost().toLocaleString()} G`);
+
+        } else {
+            this.tabNormalBtn.setFillStyle(0x3d405b);
+            this.tabRebirthBtn.setFillStyle(0x7209b7);
+
+            this.btnAtkUpgrade.setVisible(false); this.textAtkUpgrade.setVisible(false);
+            this.btnCritUpgrade.setVisible(false); this.textCritUpgrade.setVisible(false);
+            this.btnSpdUpgrade.setVisible(false); this.textSpdUpgrade.setVisible(false);
+
+            this.btnPermAtkUpgrade.setVisible(true); this.textPermAtkUpgrade.setVisible(true);
+            this.btnPermGoldUpgrade.setVisible(true); this.textPermGoldUpgrade.setVisible(true);
+
+            this.textPermAtkUpgrade.setText(`영구 공격력 (+10%) - ${getPermAtkCost()} 환생석 (Lv.${gameState.permAtkLevel})`);
+            this.textPermGoldUpgrade.setText(`영구 골드 획득량 (+15%) - ${getPermGoldCost()} 환생석 (Lv.${gameState.permGoldLevel})`);
+        }
+
+        const reward = getRebirthReward();
+        if (reward > 0) {
+            this.textRebirth.setText(`🌀 환생하기 (+${reward.toLocaleString()} 환생석)`);
+            this.btnRebirth.setFillStyle(0xaa00ff);
+        } else {
+            this.textRebirth.setText(`🌀 환생 불가 (10 스테이지 이상부터 가능)`);
+            this.btnRebirth.setFillStyle(0x555555);
+        }
+    }
+}
+
+// --- 3. Phaser 실행 설정 ---
+const config = {
+    type: Phaser.AUTO,
+    width: 400,
+    height: 600,
+    backgroundColor: '#0d0d11',
+    scene: MainScene,
+    scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH
+    }
+};
+
+const game = new Phaser.Game(config);
+</script>
+
+</body>
+</html>
