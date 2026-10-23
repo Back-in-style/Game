@@ -1,9 +1,16 @@
 import Phaser from 'phaser';
 import { gameState } from './gameState.js';
 import {
-  getAtkCost, getCritCost, getSpdCost, getPermAtkCost, getPermSpiritPowerCost,
-  getFinalAtk, getFinalCritRate, getFinalAtkSpeed, getMonsterMaxHp,
-  getSpiritPowerReward, getRebirthReward
+  getAtkCost, getCritCost, getHealthCost, getCritDamageCost, getSpdCost, getMoveSpeedCost,
+  getPermAtkCost, getPermSpiritPowerCost,
+  getConstitution, getConstitutionCost, CONSTITUTIONS,
+  getTechnique, getTechniqueUpgradeCost, getTechniqueEvolutionForRealm, getTechniqueEffectMultiplier,
+  TECHNIQUES, MAX_TECHNIQUE_LEVEL,
+  ARTIFACTS, ARTIFACT_TIERS, getArtifact, getArtifactBonuses, getArtifactDrop, getArtifactDropRate,
+  getFinalAtk, getFinalCritRate, getFinalCritDamage, getFinalMaxHealth, getFinalAtkSpeed,
+  getRealmPromotionRound, getMonsterApproachDuration, getMonsterMaxHp, getMonsterAttackDamage,
+  REALM_NAMES, REALM_MULTIPLIERS,
+  getSpiritPowerReward, getProgressAfterMonsterDefeat, getRebirthResetState, getDeathRecoveryState
 } from './gameRules.js';
 
 export default class MainScene extends Phaser.Scene {
@@ -28,16 +35,9 @@ export default class MainScene extends Phaser.Scene {
     this.atkText = this.add.text(20, 82, '', { fontSize: '12px', fill: '#ffffff' });
     this.critText = this.add.text(20, 98, '', { fontSize: '12px', fill: '#ffeb3b' });
     this.spdText = this.add.text(20, 114, '', { fontSize: '12px', fill: '#00e5ff' });
-
-    this.bossTimerText = this.add.text(200, 45, '', { fontSize: '16px', fill: '#ff1744', fontStyle: 'bold' }).setOrigin(0.5).setVisible(false);
-    this.bossTimerBg = this.add.rectangle(200, 65, 200, 8, 0x555555).setVisible(false);
-    this.bossTimerBar = this.add.rectangle(200, 65, 200, 8, 0xff1744).setVisible(false);
-    this.btnRetryBoss = this.button(200, 265, 160, 25, 0xd90429, '⚔️ 보스 재도전', 12).setVisible(false);
-    this.btnRetryBoss.on('pointerdown', () => {
-      gameState.isBossFailed = false;
-      gameState.stage += 1;
-      this.startStage();
-    });
+    this.playerHealthText = this.add.text(20, 132, '', { fontSize: '12px', fill: '#ff8a80' });
+    this.playerHealthBarBg = this.add.rectangle(155, 140, 225, 8, 0x555555).setOrigin(0, 0.5);
+    this.playerHealthBar = this.add.rectangle(155, 140, 225, 8, 0x4caf50).setOrigin(0, 0.5);
 
     this.player = this.add.rectangle(80, 200, 35, 35, 0x29b6f6);
     this.playerLabel = this.add.text(80, 170, '용사', { fontSize: '12px', fill: '#ffffff' }).setOrigin(0.5);
@@ -50,6 +50,33 @@ export default class MainScene extends Phaser.Scene {
       align: 'center',
       wordWrap: { width: 340 }
     }).setOrigin(0.5);
+    this.techniqueInfo = this.add.text(200, 335, '', {
+      fontSize: '12px',
+      fill: '#d8d8e8',
+      align: 'center',
+      lineSpacing: 5,
+      wordWrap: { width: 350 }
+    }).setOrigin(0.5).setVisible(false);
+    this.realmInfo = this.add.text(200, 400, '', {
+      fontSize: '14px',
+      fill: '#d8d8e8',
+      align: 'center',
+      lineSpacing: 10,
+      wordWrap: { width: 340 }
+    }).setOrigin(0.5).setVisible(false);
+    this.artifactInfo = this.add.text(200, 425, '', {
+      fontSize: '12px',
+      fill: '#d8d8e8',
+      align: 'left',
+      lineSpacing: 8,
+      wordWrap: { width: 340 }
+    }).setOrigin(0.5).setVisible(false);
+    this.statsScrollHint = this.add.text(200, 326, '휠 또는 드래그하여 스크롤', {
+      fontSize: '10px',
+      fill: '#9292a5'
+    }).setOrigin(0.5);
+    this.statsScrollTrack = this.add.rectangle(376, 441, 4, 194, 0x171820).setVisible(false);
+    this.statsScrollThumb = this.add.rectangle(376, 390, 4, 90, 0x74748a).setVisible(false);
 
     const tabs = [
       { id: 'stats', label: '능력치' },
@@ -68,23 +95,81 @@ export default class MainScene extends Phaser.Scene {
       return { ...tab, button };
     });
 
-    this.btnAtkUpgrade = this.button(200, 365, 360, 40, 0xd90429);
-    this.btnCritUpgrade = this.button(200, 415, 360, 40, 0xf77f00);
-    this.btnSpdUpgrade = this.button(200, 465, 360, 40, 0x00b4d8);
-    this.btnPermAtkUpgrade = this.button(200, 370, 360, 38, 0x7209b7);
-    this.btnPermGoldUpgrade = this.button(200, 417, 360, 38, 0x3a0ca3);
-    this.btnRebirth = this.button(200, 478, 360, 44, 0xaa00ff);
+    this.statsViewport = { left: 20, right: 380, top: 340, bottom: 542 };
+    const statsViewportGraphics = this.make.graphics({ x: 0, y: 0, add: false });
+    statsViewportGraphics.fillStyle(0xffffff);
+    statsViewportGraphics.fillRect(
+      this.statsViewport.left,
+      this.statsViewport.top,
+      this.statsViewport.right - this.statsViewport.left,
+      this.statsViewport.bottom - this.statsViewport.top
+    );
+    this.statsPanel = this.add.container(0, 0);
+    this.statsPanel.setMask(statsViewportGraphics.createGeometryMask());
+    this.statsUpgradeButtons = [
+      { key: 'atkLevel', cost: getAtkCost, color: 0xd90429, y: 360 },
+      { key: 'healthLevel', cost: getHealthCost, color: 0x43a047, y: 406 },
+      { key: 'critRateLevel', cost: getCritCost, color: 0xf77f00, y: 452 },
+      { key: 'critDamageLevel', cost: getCritDamageCost, color: 0xe53935, y: 498 },
+      { key: 'atkSpeedLevel', cost: getSpdCost, color: 0x00b4d8, y: 544 },
+      { key: 'moveSpeedLevel', cost: getMoveSpeedCost, color: 0x00897b, y: 590 }
+    ].map((stat) => {
+      const button = this.button(198, stat.y, 330, 38, stat.color);
+      this.statsPanel.add([button, button.label]);
+      button.on('pointerup', (pointer) => {
+        if (this.statsDragMoved || !this.isWithinStatsViewport(pointer)) return;
+        this.purchaseStatUpgrade(stat, button);
+      });
+      return { ...stat, button };
+    });
 
-    this.btnAtkUpgrade.on('pointerdown', () => this.purchaseUpgrade(getAtkCost(gameState), 'spiritPower', 'atkLevel', this.btnAtkUpgrade));
-    this.btnCritUpgrade.on('pointerdown', () => {
-      if (getFinalCritRate(gameState) < 100) this.purchaseUpgrade(getCritCost(gameState), 'spiritPower', 'critRateLevel', this.btnCritUpgrade);
+    this.btnPermAtkUpgrade = this.button(200, 370, 360, 38, 0x7209b7);
+    this.btnPermGoldUpgrade = this.button(200, 420, 360, 38, 0x3a0ca3);
+    this.btnRebirth = this.button(200, 485, 360, 44, 0xaa00ff);
+    this.btnRebirthUpgradesTab = this.button(110, 345, 170, 30, 0x3d405b, '영구 강화·환생', 11);
+    this.btnConstitutionTab = this.button(290, 345, 170, 30, 0x3d405b, '체질', 11);
+    this.constitutionInfo = this.add.text(200, 375, '', {
+      fontSize: '12px',
+      fill: '#d8d8e8',
+      align: 'center',
+      lineSpacing: 4
+    }).setOrigin(0.5);
+    this.constitutionButtons = CONSTITUTIONS.map((constitution, index) => {
+      const button = this.button(200, 414 + index * 44, 360, 36, 0x7209b7, '', 11);
+      button.on('pointerdown', () => this.purchaseConstitution(constitution.id, button));
+      return { ...constitution, button };
     });
-    this.btnSpdUpgrade.on('pointerdown', () => {
-      if (getFinalAtkSpeed(gameState) > 100 && this.purchaseUpgrade(getSpdCost(gameState), 'spiritPower', 'atkSpeedLevel', this.btnSpdUpgrade)) this.startAutoAttackTimer();
+    this.techniqueChoiceButtons = TECHNIQUES.map((technique, index) => {
+      const button = this.button(200, 376 + index * 44, 360, 36, 0x3d405b, '', 11);
+      button.on('pointerdown', () => this.chooseTechniqueForRebirth(technique.id, button));
+      return { ...technique, button };
     });
+    this.btnTechniqueUpgrade = this.button(200, 490, 360, 40, 0x7209b7);
+    this.btnTechniqueUpgrade.on('pointerdown', () => this.purchaseTechniqueUpgrade());
+    this.btnCancelRebirth = this.button(200, 525, 170, 30, 0x555555, '환생 취소', 11);
+    this.btnCancelRebirth.on('pointerdown', () => this.cancelRebirthSelection());
+    this.rebirthSubTab = 'upgrades';
+    this.rebirthSelectionPending = false;
+    this.pendingAutomaticRebirth = false;
+    this.rebirthPausedCombat = false;
+
     this.btnPermAtkUpgrade.on('pointerdown', () => this.purchaseUpgrade(getPermAtkCost(gameState), 'karma', 'permAtkLevel', this.btnPermAtkUpgrade));
     this.btnPermGoldUpgrade.on('pointerdown', () => this.purchaseUpgrade(getPermSpiritPowerCost(gameState), 'karma', 'permSpiritPowerLevel', this.btnPermGoldUpgrade));
     this.btnRebirth.on('pointerdown', () => this.executeRebirth());
+    this.btnRebirthUpgradesTab.on('pointerdown', () => {
+      this.rebirthSubTab = 'upgrades';
+      this.updateUI();
+    });
+    this.btnConstitutionTab.on('pointerdown', () => {
+      this.rebirthSubTab = 'constitution';
+      this.updateUI();
+    });
+
+    this.input.on('wheel', this.handleStatsWheel, this);
+    this.input.on('pointerdown', this.beginStatsScroll, this);
+    this.input.on('pointermove', this.moveStatsScroll, this);
+    this.input.on('pointerup', this.endStatsScroll, this);
+    this.input.on('pointerupoutside', this.endStatsScroll, this);
 
     this.startStage();
     this.startAutoAttackTimer();
@@ -105,86 +190,183 @@ export default class MainScene extends Phaser.Scene {
     return true;
   }
 
+  purchaseStatUpgrade(stat, button) {
+    const cost = stat.cost(gameState);
+    const maxed = this.isStatMaxed(stat.key);
+    if (maxed || !this.purchaseUpgrade(cost, 'spiritPower', stat.key, button)) return;
+
+    if (stat.key === 'healthLevel') {
+      gameState.currentHealth = Math.min(
+        getFinalMaxHealth(gameState),
+        gameState.currentHealth + 20
+      );
+    } else if (stat.key === 'atkSpeedLevel') {
+      this.startAutoAttackTimer();
+    }
+    this.updateUI();
+  }
+
+  purchaseConstitution(constitutionId, button) {
+    if (gameState.constitution) return false;
+    const cost = getConstitutionCost(constitutionId);
+    if (gameState.karma < cost) return false;
+
+    gameState.karma -= cost;
+    gameState.constitution = constitutionId;
+    gameState.currentHealth = Math.min(gameState.currentHealth, getFinalMaxHealth(gameState));
+    this.updateUI();
+    this.playBtnTween(button);
+    return true;
+  }
+
+  purchaseTechniqueUpgrade() {
+    if (!gameState.technique || gameState.techniqueLevel >= MAX_TECHNIQUE_LEVEL) return false;
+    const cost = getTechniqueUpgradeCost(gameState);
+    if (gameState.spiritPower < cost) return false;
+
+    gameState.spiritPower -= cost;
+    gameState.techniqueLevel += 1;
+    this.updateUI();
+    this.playBtnTween(this.btnTechniqueUpgrade);
+    return true;
+  }
+
+  isStatMaxed(statKey) {
+    if (statKey === 'critRateLevel') return getFinalCritRate(gameState) >= 100;
+    if (statKey === 'critDamageLevel') return getFinalCritDamage(gameState) >= 500;
+    if (statKey === 'atkSpeedLevel') return getFinalAtkSpeed(gameState) <= 100;
+    if (statKey === 'moveSpeedLevel') return getMonsterApproachDuration(gameState) <= 150;
+    return false;
+  }
+
+  isWithinStatsViewport(pointer) {
+    const { left, right, top, bottom } = this.statsViewport;
+    return pointer.worldX >= left && pointer.worldX <= right
+      && pointer.worldY >= top && pointer.worldY <= bottom;
+  }
+
+  handleStatsWheel(pointer, _gameObjects, _deltaX, deltaY) {
+    if (gameState.currentTab !== 'stats' || !this.isWithinStatsViewport(pointer)) return;
+    this.scrollStatsBy(deltaY * 0.5);
+  }
+
+  beginStatsScroll(pointer) {
+    if (gameState.currentTab !== 'stats' || !this.isWithinStatsViewport(pointer)) return;
+    this.statsDragging = true;
+    this.statsDragMoved = false;
+    this.statsDragStartY = pointer.worldY;
+    this.statsDragStartOffset = this.statsScrollOffset ?? 0;
+  }
+
+  moveStatsScroll(pointer) {
+    if (!this.statsDragging || !pointer.isDown) return;
+    const delta = pointer.worldY - this.statsDragStartY;
+    if (Math.abs(delta) > 6) this.statsDragMoved = true;
+    if (this.statsDragMoved) this.setStatsScrollOffset(this.statsDragStartOffset - delta);
+  }
+
+  endStatsScroll() {
+    this.statsDragging = false;
+  }
+
+  scrollStatsBy(amount) {
+    this.setStatsScrollOffset((this.statsScrollOffset ?? 0) + amount);
+  }
+
+  setStatsScrollOffset(offset) {
+    const contentBottom = this.statsUpgradeButtons.at(-1).button.y + 19;
+    const maxOffset = Math.max(0, contentBottom - this.statsViewport.bottom);
+    this.statsScrollOffset = Phaser.Math.Clamp(offset, 0, maxOffset);
+    this.statsPanel.y = -this.statsScrollOffset;
+
+    const trackHeight = this.statsViewport.bottom - this.statsViewport.top - 8;
+    const contentHeight = contentBottom - this.statsViewport.top;
+    const thumbHeight = Math.max(34, trackHeight * (trackHeight / contentHeight));
+    const thumbTravel = trackHeight - thumbHeight;
+    const thumbProgress = maxOffset === 0 ? 0 : this.statsScrollOffset / maxOffset;
+    this.statsScrollThumb.setSize(4, thumbHeight);
+    this.statsScrollThumb.setPosition(
+      376,
+      this.statsViewport.top + 4 + thumbHeight / 2 + thumbTravel * thumbProgress
+    );
+  }
+
   update() {
     if (gameState.playerState === 'WALKING' && this.bgTile) this.bgTile.tilePositionX += 2.5;
   }
 
   startStage() {
-    if (this.bossCountdownTimer) {
-      this.bossCountdownTimer.remove(false);
-      this.bossCountdownTimer = null;
-    }
-    if (gameState.stage % 10 === 0 && !gameState.isBossFailed) {
-      gameState.isBossStage = true;
-      gameState.bossTimeLeft = 30;
-      this.bossTimerText.setVisible(true);
-      this.bossTimerBg.setVisible(true);
-      this.bossTimerBar.setVisible(true);
-      this.btnRetryBoss.setVisible(false);
-      this.btnRetryBoss.label.setVisible(false);
-      this.bossCountdownTimer = this.time.addEvent({ delay: 1000, callback: this.tickBossTimer, callbackScope: this, loop: true });
-    } else {
-      gameState.isBossStage = false;
-      this.bossTimerText.setVisible(false);
-      this.bossTimerBg.setVisible(false);
-      this.bossTimerBar.setVisible(false);
-      this.btnRetryBoss.setVisible(gameState.isBossFailed);
-      this.btnRetryBoss.label.setVisible(gameState.isBossFailed);
-    }
+    this.spawnTimer?.remove(false);
+    this.spawnTimer = null;
+    gameState.playerState = 'WALKING';
     this.spawnMonsterWithApproach();
     this.updateUI();
   }
 
-  tickBossTimer() {
-    if (!gameState.isBossStage) return;
-    gameState.bossTimeLeft -= 1;
-    if (gameState.bossTimeLeft <= 0) this.failBossStage();
-    else this.updateBossTimerUI();
-  }
-
-  updateBossTimerUI() {
-    this.bossTimerText.setText(`⚠️ BOSS TIME: ${gameState.bossTimeLeft}초`);
-    this.bossTimerBar.width = 200 * (gameState.bossTimeLeft / 30);
-  }
-
-  failBossStage() {
-    if (this.bossCountdownTimer) {
-      this.bossCountdownTimer.remove(false);
-      this.bossCountdownTimer = null;
-    }
-    gameState.isBossStage = false;
-    gameState.isBossFailed = true;
-    gameState.stage -= 1;
-    gameState.killCount = 0;
-    this.destroyCurrentMonster();
-    const failText = this.add.text(200, 180, '❌ 보스 토벌 실패! 이전 스테이지로 후퇴합니다.', { fontSize: '13px', fill: '#ff1744', fontStyle: 'bold' }).setOrigin(0.5);
-    this.tweens.add({ targets: failText, y: 150, alpha: 0, duration: 2000, onComplete: () => failText.destroy() });
-    this.startStage();
-  }
-
   executeRebirth() {
-    const reward = getRebirthReward(gameState.stage);
-    if (reward <= 0) {
-      alert('환생하려면 최소 10 스테이지 이상 도달해야 합니다!');
+    if (!gameState.rebirthUnlocked) {
+      alert('5라운드 보스를 처치하면 환생할 수 있습니다!');
       return;
     }
-    if (!confirm(`환생하시겠습니까?\n\n[환생 보상]: 환생석 +${reward}개\n* 스테이지, 골드, 일반 강화 레벨이 초기화됩니다.`)) return;
+    if (!confirm('환생하시겠습니까?\n\n환생 후 공법을 하나 선택해야 진행할 수 있습니다. 스테이지, 라운드, 영력 강화와 경지는 초기화되고 업, 선석, 법보와 영구 강화는 유지됩니다.')) return;
 
-    gameState.karma += reward;
-    gameState.spiritPower = 0;
-    gameState.atkLevel = 1;
-    gameState.critRateLevel = 0;
-    gameState.atkSpeedLevel = 0;
-    gameState.stage = 1;
-    gameState.killCount = 0;
-    gameState.isBossFailed = false;
+    this.rebirthSelectionPending = true;
+    this.pendingAutomaticRebirth = false;
+    this.pauseCombatForRebirthSelection();
+    gameState.currentTab = 'technique';
+    this.updateUI();
+  }
+
+  pauseCombatForRebirthSelection() {
+    for (const timer of [this.attackTimer, this.monsterAttackTimer, this.spawnTimer]) {
+      if (timer) timer.paused = true;
+    }
+    this.currentMonster?.approachTween?.pause();
+    this.rebirthPausedCombat = true;
+  }
+
+  resumeCombatAfterRebirthCancellation() {
+    if (!this.rebirthPausedCombat) return;
+    for (const timer of [this.attackTimer, this.monsterAttackTimer, this.spawnTimer]) {
+      if (timer) timer.paused = false;
+    }
+    this.currentMonster?.approachTween?.resume();
+    this.rebirthPausedCombat = false;
+  }
+
+  chooseTechniqueForRebirth(techniqueId, button) {
+    if (!this.rebirthSelectionPending) return false;
+    const technique = getTechnique(techniqueId);
+    if (gameState.karma < technique.cost) return false;
+
+    Object.assign(gameState, getRebirthResetState(gameState));
+    gameState.karma -= technique.cost;
+    gameState.technique = techniqueId;
+    gameState.techniqueChosenThisRebirth = true;
+    gameState.techniqueLevel = 0;
+    gameState.techniqueEvolution = getTechniqueEvolutionForRealm(gameState.realmIndex);
+    this.rebirthSelectionPending = false;
+    this.pendingAutomaticRebirth = false;
+    this.rebirthPausedCombat = false;
     this.destroyCurrentMonster();
     this.startAutoAttackTimer();
     this.startStage();
-    this.playBtnTween(this.btnRebirth);
+    if (button) this.playBtnTween(button);
+    return true;
+  }
+
+  cancelRebirthSelection() {
+    if (!this.rebirthSelectionPending || this.pendingAutomaticRebirth) return;
+    this.rebirthSelectionPending = false;
+    this.resumeCombatAfterRebirthCancellation();
+    gameState.currentTab = 'rebirth';
+    this.updateUI();
   }
 
   destroyCurrentMonster() {
+    this.monsterAttackTimer?.remove(false);
+    this.monsterAttackTimer = null;
+    this.currentMonster?.approachTween?.stop();
     if (!this.currentMonster) return;
     this.currentMonster.sprite?.destroy();
     this.currentMonster.hpText?.destroy();
@@ -201,86 +383,141 @@ export default class MainScene extends Phaser.Scene {
   }
 
   spawnMonsterWithApproach() {
+    if (!gameState.isPlayerAlive) return;
     gameState.playerState = 'WALKING';
     this.playerBounceTween.resume();
     const isBoss = gameState.isBossStage;
-    const hp = getMonsterMaxHp(gameState.stage, isBoss);
-    const size = isBoss ? 60 : 40;
-    const color = isBoss ? 0x9d0208 : 0xef233c;
+    const isFinalBoss = isBoss && gameState.round === 25;
+    const hp = getMonsterMaxHp(gameState.stage, gameState.round, isBoss);
+    const size = isBoss ? (isFinalBoss ? 72 : 60) : 40;
+    const color = isBoss ? (isFinalBoss ? 0x6a040f : 0x9d0208) : 0xef233c;
     const sprite = this.add.rectangle(450, 200, size, size, color);
     const hpText = this.add.text(450, 160, `HP: ${hp}`, { fontSize: '12px', fill: '#ff8a80' }).setOrigin(0.5);
-    this.currentMonster = { sprite, hp, maxHp: hp, hpText, isApproaching: true };
-    this.tweens.add({
-      targets: [sprite, hpText], x: 280, duration: 500,
+    const monster = { sprite, hp, maxHp: hp, hpText, isBoss, isApproaching: true };
+    this.currentMonster = monster;
+    monster.approachTween = this.tweens.add({
+      targets: [sprite, hpText], x: 280, duration: getMonsterApproachDuration(gameState),
       onComplete: () => {
-        if (this.currentMonster) this.currentMonster.isApproaching = false;
+        if (this.currentMonster !== monster || !gameState.isPlayerAlive) return;
+        monster.isApproaching = false;
         gameState.playerState = 'ATTACKING';
         this.playerBounceTween.pause();
+        this.monsterAttackTimer = this.time.addEvent({
+          delay: 1000,
+          callback: () => this.damagePlayer(getMonsterAttackDamage(gameState.stage, gameState.round, isBoss)),
+          callbackScope: this,
+          loop: true
+        });
       }
     });
   }
 
   autoAttack() {
-    if (!this.currentMonster || this.currentMonster.hp <= 0 || this.currentMonster.isApproaching) return;
+    if (!gameState.isPlayerAlive || !this.currentMonster || this.currentMonster.hp <= 0 || this.currentMonster.isApproaching) return;
+    const monster = this.currentMonster;
     const isCrit = Math.random() * 100 < getFinalCritRate(gameState);
     let damage = getFinalAtk(gameState);
-    if (isCrit) damage = Math.floor(damage * (gameState.baseCritDmg / 100));
+    if (isCrit) damage = Math.floor(damage * (getFinalCritDamage(gameState) / 100));
     const slash = this.add.rectangle(this.player.x + 20, this.player.y, 20, 6, isCrit ? 0xffea00 : 0x00e5ff);
     this.tweens.add({
-      targets: slash, x: this.currentMonster.sprite.x, duration: 100,
-      onComplete: () => { slash.destroy(); this.damageMonster(damage, isCrit); }
+      targets: slash, x: monster.sprite.x, duration: 100,
+      onComplete: () => { slash.destroy(); this.damageMonster(monster, damage, isCrit); }
     });
   }
 
-  damageMonster(amount, isCrit) {
-    if (!this.currentMonster) return;
-    this.currentMonster.hp -= amount;
+  damageMonster(monster, amount, isCrit) {
+    if (this.currentMonster !== monster || monster.hp <= 0 || !gameState.isPlayerAlive) return;
+    monster.hp -= amount;
     const dmgText = this.add.text(
-      this.currentMonster.sprite.x + Math.floor(Math.random() * 20 - 10), 130,
+      monster.sprite.x + Math.floor(Math.random() * 20 - 10), 170,
       isCrit ? `💥 ${amount}!` : `-${amount}`,
       { fontSize: isCrit ? '22px' : '16px', fill: isCrit ? '#ff1744' : '#ffeb3b', fontStyle: 'bold' }
     ).setOrigin(0.5);
     this.tweens.add({ targets: dmgText, y: 90, alpha: 0, duration: isCrit ? 600 : 400, onComplete: () => dmgText.destroy() });
-    if (this.currentMonster.hp > 0) this.currentMonster.hpText.setText(`HP: ${this.currentMonster.hp}`);
-    else this.killMonster();
+    if (monster.hp > 0) monster.hpText.setText(`HP: ${monster.hp}`);
+    else this.killMonster(monster);
     this.updateUI();
   }
 
-  killMonster() {
-    const isBoss = gameState.isBossStage;
-    gameState.spiritPower += getSpiritPowerReward(gameState.stage, isBoss, gameState.permSpiritPowerLevel);
+  damagePlayer(amount) {
+    if (!gameState.isPlayerAlive) return;
+    gameState.currentHealth = Math.max(0, gameState.currentHealth - amount);
+    this.updateUI();
+    if (gameState.currentHealth === 0) this.handlePlayerDeath();
+  }
+
+  handlePlayerDeath() {
+    if (!gameState.isPlayerAlive) return;
+    gameState.isPlayerAlive = false;
+    gameState.playerState = 'DEAD';
+    this.attackTimer?.remove(false);
+    this.attackTimer = null;
+    this.spawnTimer?.remove(false);
+    this.spawnTimer = null;
     this.destroyCurrentMonster();
-    if (isBoss) {
-      this.bossCountdownTimer?.remove(false);
-      this.bossCountdownTimer = null;
-      gameState.stage += 1;
-      gameState.killCount = 0;
+    const rebirthed = gameState.rebirthUnlocked;
+    if (rebirthed) {
+      this.rebirthSelectionPending = true;
+      this.pendingAutomaticRebirth = true;
+      gameState.currentTab = 'technique';
+      this.showCombatNotice('공법을 선택하면 자동 환생합니다.');
+      this.updateUI();
+      return;
+    }
+    Object.assign(gameState, getDeathRecoveryState(gameState));
+    this.showCombatNotice(`사망: ${gameState.stage}스테이지 1라운드로 복귀`);
+    this.startAutoAttackTimer();
+    this.startStage();
+  }
+
+  showCombatNotice(message) {
+    const notice = this.add.text(200, 180, message, {
+      fontSize: '14px',
+      fill: '#ff8a80',
+      fontStyle: 'bold',
+      backgroundColor: '#000000'
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: notice, y: 155, alpha: 0, duration: 1800, onComplete: () => notice.destroy() });
+  }
+
+  killMonster(monster) {
+    if (this.currentMonster !== monster) return;
+    gameState.spiritPower += getSpiritPowerReward(gameState.stage, monster.isBoss, gameState.permSpiritPowerLevel);
+    const droppedArtifact = getArtifactDrop(monster.isBoss);
+    if (droppedArtifact) {
+      gameState.artifacts.push(droppedArtifact);
+      this.showCombatNotice(`법보 획득: ${getArtifact(droppedArtifact).name}`);
+    }
+    Object.assign(gameState, getProgressAfterMonsterDefeat(gameState));
+    this.destroyCurrentMonster();
+    if (gameState.isBossStage || monster.isBoss) {
       this.startStage();
     } else {
-      gameState.killCount += 1;
-      if (gameState.killCount >= gameState.maxKills) {
-        gameState.stage += 1;
-        gameState.killCount = 0;
-        this.startStage();
-      } else {
-        this.updateUI();
-        this.time.delayedCall(200, () => this.spawnMonsterWithApproach());
-      }
+      this.updateUI();
+      this.spawnTimer = this.time.delayedCall(200, () => {
+        this.spawnTimer = null;
+        this.spawnMonsterWithApproach();
+      });
     }
   }
 
   updateUI() {
     if (gameState.isBossStage) {
-      this.stageText.setText(`⚠️ STAGE ${gameState.stage} [BOSS] ⚠️`);
-      this.updateBossTimerUI();
+      const bossTitle = gameState.round === 25 ? 'FINAL BOSS' : 'ROUND BOSS';
+      this.stageText.setText(`STAGE ${gameState.stage} · ROUND ${gameState.round}/25 [${bossTitle}]`);
     } else {
-      this.stageText.setText(`STAGE ${gameState.stage} (${gameState.killCount}/${gameState.maxKills})`);
+      this.stageText.setText(`STAGE ${gameState.stage} · ROUND ${gameState.round}/25 (${gameState.roundMonsterKills}/50)`);
     }
     this.spiritPowerText.setText(`영력: ${gameState.spiritPower.toLocaleString()}`);
     this.karmaText.setText(`업: ${gameState.karma.toLocaleString()}`);
     this.atkText.setText(`공격력: ${getFinalAtk(gameState)} (일반 Lv.${gameState.atkLevel} / 영구 +${gameState.permAtkLevel * 10}%)`);
     this.critText.setText(`치명타: ${getFinalCritRate(gameState)}% (Lv.${gameState.critRateLevel})`);
     this.spdText.setText(`공격속도: ${(1000 / getFinalAtkSpeed(gameState)).toFixed(2)}회/초 (Lv.${gameState.atkSpeedLevel})`);
+    const maxHealth = getFinalMaxHealth(gameState);
+    const healthRatio = gameState.currentHealth / maxHealth;
+    this.playerHealthText.setText(`체력: ${gameState.currentHealth}/${maxHealth}`);
+    this.playerHealthBar.width = 225 * healthRatio;
+    this.playerHealthBar.setFillStyle(healthRatio <= 0.25 ? 0xf44336 : 0x4caf50);
 
     const selectedTab = this.tabButtons.find((tab) => tab.id === gameState.currentTab) ?? this.tabButtons[0];
     gameState.currentTab = selectedTab.id;
@@ -290,28 +527,184 @@ export default class MainScene extends Phaser.Scene {
 
     const isStatsTab = selectedTab.id === 'stats';
     const isRebirthTab = selectedTab.id === 'rebirth';
+    const isTechniqueTab = selectedTab.id === 'technique';
+    const isArtifactTab = selectedTab.id === 'artifact';
+    const isConstitutionTab = isRebirthTab && this.rebirthSubTab === 'constitution';
+    const isRealmTab = selectedTab.id === 'realm';
     this.panelTitle.setText(selectedTab.label);
-    this.panelPlaceholder.setVisible(!isStatsTab && !isRebirthTab);
+    this.panelPlaceholder.setVisible(!isStatsTab && !isRebirthTab && !isRealmTab && !isTechniqueTab && !isArtifactTab);
+    this.realmInfo.setVisible(isRealmTab);
+    if (isRealmTab) this.updateRealmInfo();
+    this.artifactInfo.setVisible(isArtifactTab);
+    if (isArtifactTab) this.updateArtifactInfo();
+    this.techniqueInfo.setVisible(isTechniqueTab);
+    for (const option of this.techniqueChoiceButtons) {
+      this.setButtonVisible(option.button, isTechniqueTab && this.rebirthSelectionPending);
+    }
+    this.setButtonVisible(this.btnTechniqueUpgrade, isTechniqueTab && !this.rebirthSelectionPending && Boolean(gameState.technique));
+    this.setButtonVisible(this.btnCancelRebirth, isTechniqueTab && this.rebirthSelectionPending && !this.pendingAutomaticRebirth);
+    this.updateTechniqueLabels();
     this.panelPlaceholder.setText(
       selectedTab.id === 'shop'
         ? '상점은 추후 구현 예정입니다.'
         : '이 기능은 다음 구현 단계에서 추가됩니다.'
     );
-    this.setButtonVisible(this.btnAtkUpgrade, isStatsTab);
-    this.setButtonVisible(this.btnCritUpgrade, isStatsTab);
-    this.setButtonVisible(this.btnSpdUpgrade, isStatsTab);
+    this.statsScrollHint.setVisible(isStatsTab);
+    this.statsScrollTrack.setVisible(isStatsTab);
+    this.statsScrollThumb.setVisible(isStatsTab);
+    this.statsPanel.setVisible(isStatsTab);
+    this.setStatsScrollOffset(this.statsScrollOffset ?? 0);
     this.setButtonVisible(this.btnPermAtkUpgrade, isRebirthTab);
     this.setButtonVisible(this.btnPermGoldUpgrade, isRebirthTab);
     this.setButtonVisible(this.btnRebirth, isRebirthTab);
-    this.btnAtkUpgrade.label.setText(`공격력 강화 - ${getAtkCost(gameState).toLocaleString()} 영력`);
-    this.btnCritUpgrade.label.setText(getFinalCritRate(gameState) >= 100 ? '치명타 확률 - MAX' : `치명타 확률 강화 - ${getCritCost(gameState).toLocaleString()} 영력`);
-    this.btnSpdUpgrade.label.setText(getFinalAtkSpeed(gameState) <= 100 ? '공격 속도 - MAX' : `공격 속도 강화 - ${getSpdCost(gameState).toLocaleString()} 영력`);
+    this.setButtonVisible(this.btnRebirthUpgradesTab, isRebirthTab);
+    this.setButtonVisible(this.btnConstitutionTab, isRebirthTab);
+    this.constitutionInfo.setVisible(isConstitutionTab);
+    for (const constitution of this.constitutionButtons) {
+      this.setButtonVisible(constitution.button, isConstitutionTab);
+    }
+    this.btnPermAtkUpgrade.setVisible(isRebirthTab && !isConstitutionTab);
+    this.btnPermAtkUpgrade.label.setVisible(isRebirthTab && !isConstitutionTab);
+    this.btnPermGoldUpgrade.setVisible(isRebirthTab && !isConstitutionTab);
+    this.btnPermGoldUpgrade.label.setVisible(isRebirthTab && !isConstitutionTab);
+    this.btnRebirth.setVisible(isRebirthTab && !isConstitutionTab);
+    this.btnRebirth.label.setVisible(isRebirthTab && !isConstitutionTab);
+    this.btnRebirthUpgradesTab.setFillStyle(isRebirthTab && !isConstitutionTab ? 0x4cc9f0 : 0x3d405b);
+    this.btnConstitutionTab.setFillStyle(isConstitutionTab ? 0x4cc9f0 : 0x3d405b);
+    this.updateStatUpgradeLabels();
     this.btnPermAtkUpgrade.label.setText(`영구 공격력 (+10%) - ${getPermAtkCost(gameState)} 업 (Lv.${gameState.permAtkLevel})`);
     this.btnPermGoldUpgrade.label.setText(`영구 영력 획득량 (+15%) - ${getPermSpiritPowerCost(gameState)} 업 (Lv.${gameState.permSpiritPowerLevel})`);
+    this.updateConstitutionLabels();
 
-    const reward = getRebirthReward(gameState.stage);
-    this.btnRebirth.label.setText(reward > 0 ? `🌀 환생하기 (+${reward.toLocaleString()} 업)` : '🌀 환생 불가 (10 스테이지 이상부터 가능)');
-    this.btnRebirth.setFillStyle(reward > 0 ? 0xaa00ff : 0x555555);
+    this.btnRebirth.label.setText(gameState.rebirthUnlocked ? '🌀 환생하기' : '🌀 5라운드 보스 처치 후 환생 가능');
+    this.btnRebirth.setFillStyle(gameState.rebirthUnlocked ? 0xaa00ff : 0x555555);
+  }
+
+  updateConstitutionLabels() {
+    const selected = gameState.constitution ? getConstitution(gameState.constitution) : null;
+    this.constitutionInfo.setText(
+      selected
+        ? `이번 환생 체질: ${selected.name} · 다음 환생 전까지 변경 불가`
+        : `이번 환생에서 하나를 구매할 수 있습니다.\n현재 업: ${gameState.karma.toLocaleString()}`
+    );
+
+    for (const constitution of this.constitutionButtons) {
+      const isSelected = gameState.constitution === constitution.id;
+      const canPurchase = !gameState.constitution && gameState.karma >= constitution.cost;
+      const effect = [];
+      if (constitution.atkMultiplier > 1) effect.push(`공격력 +${Math.round((constitution.atkMultiplier - 1) * 100)}%`);
+      if (constitution.healthMultiplier > 1) effect.push(`최대 체력 +${Math.round((constitution.healthMultiplier - 1) * 100)}%`);
+      const label = `${constitution.name} · ${effect.join(' · ')} · ${constitution.cost}업`;
+      constitution.button.label.setText(isSelected ? `${label} · 선택됨` : label);
+      constitution.button.setFillStyle(isSelected ? 0x43a047 : canPurchase ? 0x7209b7 : 0x555555);
+    }
+  }
+
+  updateTechniqueLabels() {
+    for (const option of this.techniqueChoiceButtons) {
+      const effects = [];
+      if (option.atkPerLevel) effects.push(`공격력 +${option.atkPerLevel * 100}%/레벨`);
+      if (option.healthPerLevel) effects.push(`최대 체력 +${option.healthPerLevel * 100}%/레벨`);
+      const affordable = gameState.karma >= option.cost;
+      option.button.label.setText(`${option.name} · ${effects.join(' · ')} · ${option.cost}업`);
+      option.button.setFillStyle(affordable ? 0x7209b7 : 0x555555);
+    }
+
+    if (this.rebirthSelectionPending) {
+      this.techniqueInfo.setText(
+        `환생 공법을 선택하세요. 선택하면 환생이 완료됩니다.\n` +
+        `보유 업: ${gameState.karma.toLocaleString()}${this.pendingAutomaticRebirth ? '\n자동 환생 대기 중' : ''}`
+      );
+      return;
+    }
+
+    if (!gameState.technique) {
+      this.techniqueInfo.setText('공법은 환생할 때 선택할 수 있습니다.');
+      return;
+    }
+
+    const technique = getTechnique(gameState.technique);
+    const evolutionMultiplier = getTechniqueEffectMultiplier(gameState.techniqueEvolution);
+    const effect = [];
+    if (technique.atkPerLevel) {
+      effect.push(`공격력 +${(technique.atkPerLevel * gameState.techniqueLevel * evolutionMultiplier * 100).toFixed(0)}%`);
+    }
+    if (technique.healthPerLevel) {
+      effect.push(`최대 체력 +${(technique.healthPerLevel * gameState.techniqueLevel * evolutionMultiplier * 100).toFixed(0)}%`);
+    }
+    const evolutionNames = ['결단기', '사축기', '진선'];
+    const nextEvolution = evolutionNames[gameState.techniqueEvolution];
+    this.techniqueInfo.setText(
+      `현재 공법: ${technique.name} · Lv.${gameState.techniqueLevel}/${MAX_TECHNIQUE_LEVEL}\n` +
+      `효과: ${effect.length ? effect.join(' · ') : '강화 필요'} · 진화 ${gameState.techniqueEvolution}/3\n` +
+      (nextEvolution ? `다음 진화: ${nextEvolution} 진입 시 자동` : '최종 진화 완료')
+    );
+
+    const isMaxed = gameState.techniqueLevel >= MAX_TECHNIQUE_LEVEL;
+    const cost = getTechniqueUpgradeCost(gameState);
+    this.btnTechniqueUpgrade.label.setText(
+      isMaxed ? '공법 최대 레벨' : `공법 강화 · ${cost.toLocaleString()} 영력`
+    );
+    this.btnTechniqueUpgrade.setFillStyle(!isMaxed && gameState.spiritPower >= cost ? 0x7209b7 : 0x555555);
+  }
+
+  updateArtifactInfo() {
+    const bonuses = getArtifactBonuses(gameState.artifacts);
+    const inventoryLines = ARTIFACTS.map((artifact) => {
+      const count = gameState.artifacts.filter((artifactId) => artifactId === artifact.id).length;
+      const tierName = ARTIFACT_TIERS.find((tier) => tier.id === artifact.tier).name;
+      return `${tierName} · ${artifact.name} ×${count}`;
+    });
+    const effects = [];
+    if (bonuses.atkBonus) effects.push(`공격력 +${bonuses.atkBonus * 100}%`);
+    if (bonuses.healthBonus) effects.push(`최대 체력 +${bonuses.healthBonus * 100}%`);
+    if (bonuses.critRateBonus) effects.push(`치명타 확률 +${bonuses.critRateBonus}%p`);
+
+    this.artifactInfo.setText(
+      `보유 법보는 모두 자동 적용됩니다.\n` +
+      `드랍률: 일반 ${(getArtifactDropRate(false) * 100).toFixed(1)}% · 보스 ${(getArtifactDropRate(true) * 100).toFixed(0)}%\n\n` +
+      `${inventoryLines.join('\n')}\n\n` +
+      `누적 효과: ${effects.length ? effects.join(' · ') : '없음'}`
+    );
+  }
+
+  updateStatUpgradeLabels() {
+    const labels = {
+      atkLevel: `공격력 Lv.${gameState.atkLevel} · +2`,
+      healthLevel: `체력 Lv.${gameState.healthLevel} · 최대 체력 +20`,
+      critRateLevel: `치명타 확률 ${getFinalCritRate(gameState)}% · +1%`,
+      critDamageLevel: `치명타 피해 ${getFinalCritDamage(gameState)}% · +10%p`,
+      atkSpeedLevel: `공격속도 Lv.${gameState.atkSpeedLevel} · 간격 -30ms`,
+      moveSpeedLevel: `이동속도 Lv.${gameState.moveSpeedLevel} · 접근 ${getMonsterApproachDuration(gameState)}ms`
+    };
+
+    for (const stat of this.statsUpgradeButtons) {
+      const maxed = this.isStatMaxed(stat.key);
+      const label = maxed
+        ? `${labels[stat.key]} · MAX`
+        : `${labels[stat.key]} · ${stat.cost(gameState).toLocaleString()} 영력`;
+      stat.button.label.setText(label).setFontSize('11px');
+      stat.button.setFillStyle(maxed ? 0x555555 : stat.color);
+    }
+  }
+
+  updateRealmInfo() {
+    const realmIndex = gameState.realmIndex;
+    const promotionRound = getRealmPromotionRound(realmIndex);
+    const currentRealm = REALM_NAMES[realmIndex];
+    const multiplier = REALM_MULTIPLIERS[realmIndex];
+
+    if (promotionRound === null) {
+      this.realmInfo.setText(
+        `현재 경지: ${currentRealm}\n공격력·최대 체력 배율: ×${multiplier.toLocaleString()}\n최고 경지에 도달했습니다.`
+      );
+      return;
+    }
+
+    this.realmInfo.setText(
+      `현재 경지: ${currentRealm}\n공격력·최대 체력 배율: ×${multiplier.toLocaleString()}\n` +
+      `다음 경지: ${REALM_NAMES[realmIndex + 1]}\n${promotionRound}라운드 보스 처치 시 자동 승급`
+    );
   }
 
   setButtonVisible(button, visible) {
