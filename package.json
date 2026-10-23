@@ -1,0 +1,17 @@
+{
+  "name": "rebirth-hero-idle",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "phaser": "3.60.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}
