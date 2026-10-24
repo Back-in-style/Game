@@ -7,6 +7,8 @@ import {
   getTechnique, getTechniqueUpgradeCost, getTechniqueEvolutionForRealm, getTechniqueEffectMultiplier,
   TECHNIQUES, MAX_TECHNIQUE_LEVEL,
   ARTIFACTS, ARTIFACT_TIERS, getArtifact, getArtifactBonuses, getArtifactDrop, getArtifactDropRate,
+  ROUND_MONSTER_COUNT, MONSTER_SPAWN_COUNT,
+  formatNumberShort,
   getFinalAtk, getFinalCritRate, getFinalCritDamage, getFinalMaxHealth, getFinalAtkSpeed,
   getRealmPromotionRound, getMonsterApproachDuration, getMonsterMaxHp, getMonsterAttackDamage,
   REALM_NAMES, REALM_MULTIPLIERS,
@@ -152,6 +154,9 @@ export default class MainScene extends Phaser.Scene {
     this.rebirthSelectionPending = false;
     this.pendingAutomaticRebirth = false;
     this.rebirthPausedCombat = false;
+    this.activeMonsters = [];
+    this.monsterAttackTimers = [];
+    this.spawnGroupOffset = 0;
 
     this.btnPermAtkUpgrade.on('pointerdown', () => this.purchaseUpgrade(getPermAtkCost(gameState), 'karma', 'permAtkLevel', this.btnPermAtkUpgrade));
     this.btnPermGoldUpgrade.on('pointerdown', () => this.purchaseUpgrade(getPermSpiritPowerCost(gameState), 'karma', 'permSpiritPowerLevel', this.btnPermGoldUpgrade));
@@ -268,7 +273,7 @@ export default class MainScene extends Phaser.Scene {
   updateDeveloperPanel() {
     if (!this.devRows) return;
     for (const row of this.devRows) {
-      row.value.setText(gameState[row.key].toLocaleString());
+      row.value.setText(formatNumberShort(gameState[row.key]));
     }
     this.devRebirthButton.label.setText(
       `환생 ${gameState.rebirthUnlocked ? '해금됨' : '잠김'} · 토글`
@@ -429,8 +434,100 @@ export default class MainScene extends Phaser.Scene {
     );
   }
 
-  update() {
+  update(_time, delta) {
     if (gameState.playerState === 'WALKING' && this.bgTile) this.bgTile.tilePositionX += 2.5;
+    if (gameState.isPlayerAlive) {
+      this.updatePlayerMovement(delta);
+      this.updateMonsterApproach(delta);
+    }
+  }
+
+  updatePlayerMovement() {
+    this.player.x = 80;
+    this.player.y = 200;
+    this.playerLabel.y = 170;
+
+    const aliveMonsters = this.activeMonsters.filter((monster) =>
+      monster && monster.hp > 0 && monster.sprite && !monster.sprite.destroyed
+    );
+    if (!aliveMonsters.length) {
+      gameState.playerState = 'WALKING';
+      return;
+    }
+
+    const nearestMonster = aliveMonsters.reduce((best, monster) => {
+      const distance = Math.abs(this.player.x - monster.sprite.x);
+      if (!best || distance < best.distance) return { monster, distance };
+      return best;
+    }, null);
+
+    if (!nearestMonster) {
+      gameState.playerState = 'WALKING';
+      return;
+    }
+
+    const attackRange = 170;
+    gameState.playerState = Math.abs(this.player.x - nearestMonster.monster.sprite.x) <= attackRange ? 'ATTACKING' : 'WALKING';
+  }
+
+  updateMonsterApproach(delta) {
+    const step = (120 * delta) / 1000;
+    const attackRange = 170;
+
+    for (const monster of this.activeMonsters) {
+      if (!monster || monster.hp <= 0 || !monster.sprite || monster.sprite.destroyed) continue;
+
+      monster.sprite.y = this.player.y;
+      if (monster.hpText) {
+        monster.hpText.x = monster.sprite.x;
+        monster.hpText.y = monster.sprite.y - 20;
+      }
+
+      const distance = Math.abs(this.player.x - monster.sprite.x);
+      if (distance > attackRange) {
+        const targetX = monster.targetX ?? monster.sprite.x;
+        const direction = targetX > monster.sprite.x ? 1 : -1;
+        monster.sprite.x += direction * Math.min(step, Math.abs(targetX - monster.sprite.x));
+        if (monster.hpText) monster.hpText.x = monster.sprite.x;
+      }
+    }
+  }
+
+  reflowMonsterFormation() {
+    const groups = new Map();
+
+    for (const monster of this.activeMonsters) {
+      if (!monster) continue;
+      const groupIndex = Number.isFinite(monster.groupIndex) ? monster.groupIndex : 0;
+      if (!groups.has(groupIndex)) groups.set(groupIndex, []);
+      groups.get(groupIndex).push(monster);
+    }
+
+    const orderedGroups = [...groups.keys()].sort((left, right) => left - right);
+    orderedGroups.forEach((groupIndex) => {
+      const groupMonsters = groups
+        .get(groupIndex)
+        .slice()
+        .sort((left, right) => (left?.laneIndex ?? 0) - (right?.laneIndex ?? 0));
+
+      const baseX = 190 + groupIndex * 72;
+      const step = 62;
+      const leftmostX = baseX + 12;
+      const targetXs = [leftmostX, leftmostX + step, leftmostX + step * 2];
+
+      groupMonsters.forEach((monster, laneIndex) => {
+        if (!monster) return;
+        monster.groupIndex = groupIndex;
+        monster.laneIndex = laneIndex;
+        monster.targetX = targetXs[laneIndex] ?? leftmostX + step * laneIndex;
+        monster.sprite.y = this.player.y;
+        if (monster.hpText) {
+          monster.hpText.y = monster.sprite.y - 20;
+          monster.hpText.x = monster.targetX;
+        }
+        monster.sprite.x = monster.targetX;
+      });
+    });
   }
 
   startStage() {
@@ -501,13 +598,33 @@ export default class MainScene extends Phaser.Scene {
     this.updateUI();
   }
 
+  syncCurrentMonster() {
+    const aliveMonsters = this.activeMonsters.filter((monster) => monster && monster.hp > 0 && monster.sprite && monster.sprite.active);
+    if (!aliveMonsters.length) {
+      this.currentMonster = null;
+      return null;
+    }
+
+    this.currentMonster = aliveMonsters.reduce((best, monster) => {
+      const distance = Math.abs(this.player.x - monster.sprite.x);
+      if (!best || distance < best.distance) return { monster, distance };
+      return best;
+    }, null).monster;
+    return this.currentMonster;
+  }
+
   destroyCurrentMonster() {
-    this.monsterAttackTimer?.remove(false);
+    for (const timer of this.monsterAttackTimers) {
+      timer?.remove(false);
+    }
+    this.monsterAttackTimers = [];
     this.monsterAttackTimer = null;
-    this.currentMonster?.approachTween?.stop();
-    if (!this.currentMonster) return;
-    this.currentMonster.sprite?.destroy();
-    this.currentMonster.hpText?.destroy();
+    for (const monster of this.activeMonsters) {
+      monster?.approachTween?.stop();
+      monster?.sprite?.destroy();
+      monster?.hpText?.destroy();
+    }
+    this.activeMonsters = [];
     this.currentMonster = null;
   }
 
@@ -529,42 +646,82 @@ export default class MainScene extends Phaser.Scene {
     const hp = getMonsterMaxHp(gameState.stage, gameState.round, isBoss, gameState.realmIndex);
     const size = isBoss ? (isFinalBoss ? 72 : 60) : 40;
     const color = isBoss ? (isFinalBoss ? 0x6a040f : 0x9d0208) : 0xef233c;
-    const sprite = this.add.rectangle(450, 200, size, size, color);
-    const hpText = this.add.text(450, 160, `HP: ${hp}`, { fontSize: '12px', fill: '#ff8a80' }).setOrigin(0.5);
-    const monster = { sprite, hp, maxHp: hp, hpText, isBoss, isApproaching: true };
-    this.currentMonster = monster;
-    monster.approachTween = this.tweens.add({
-      targets: [sprite, hpText], x: 280, duration: getMonsterApproachDuration(gameState),
-      onComplete: () => {
-        if (this.currentMonster !== monster || !gameState.isPlayerAlive) return;
-        monster.isApproaching = false;
-        gameState.playerState = 'ATTACKING';
-        this.playerBounceTween.pause();
-        this.monsterAttackTimer = this.time.addEvent({
-          delay: 1000,
-          callback: () => this.damagePlayer(getMonsterAttackDamage(gameState.stage, gameState.round, isBoss)),
-          callbackScope: this,
-          loop: true
-        });
-      }
-    });
+
+    const highestExistingGroupIndex = this.activeMonsters.reduce(
+      (maxIndex, monster) => Math.max(maxIndex, Number.isFinite(monster?.groupIndex) ? monster.groupIndex : 0),
+      -1
+    );
+    const groupIndex = highestExistingGroupIndex + 1;
+    const groupAnchorX = 120 + groupIndex * 72;
+    const step = 62;
+    const leftmostX = groupAnchorX + 12;
+    const targetXs = [leftmostX, leftmostX + step, leftmostX + step * 2];
+
+    for (let spawnIndex = 0; spawnIndex < MONSTER_SPAWN_COUNT; spawnIndex += 1) {
+      const spriteX = targetXs[spawnIndex];
+      const spriteY = this.player.y;
+      const sprite = this.add.rectangle(spriteX, spriteY, size, size, color);
+      const hpText = this.add.text(spriteX, spriteY - 20, `HP: ${hp}`, { fontSize: '12px', fill: '#ff8a80' }).setOrigin(0.5);
+      const monster = {
+        sprite, hp, maxHp: hp, hpText,
+        isBoss, isApproaching: false, spawnIndex,
+        groupIndex,
+        laneIndex: spawnIndex,
+        targetX: spriteX,
+        targetY: spriteY,
+        attackTimer: null,
+        attackRange: 170
+      };
+      this.activeMonsters.push(monster);
+
+      monster.attackTimer = this.time.addEvent({
+        delay: 1000,
+        callback: () => {
+          if (!gameState.isPlayerAlive || monster.hp <= 0 || monster.sprite.destroyed) return;
+          const nearestMonster = this.activeMonsters
+            .filter((candidate) => candidate && candidate.hp > 0 && candidate.sprite && !candidate.sprite.destroyed)
+            .sort((left, right) => Math.abs(this.player.x - left.sprite.x) - Math.abs(this.player.x - right.sprite.x))[0];
+          if (!nearestMonster || nearestMonster !== monster) return;
+          const distance = Math.abs(this.player.x - monster.sprite.x);
+          if (distance <= monster.attackRange) {
+            this.damagePlayer(getMonsterAttackDamage(gameState.stage, gameState.round, isBoss));
+          }
+        },
+        callbackScope: this,
+        loop: true
+      });
+      this.monsterAttackTimers.push(monster.attackTimer);
+    }
+    this.spawnGroupOffset = groupIndex;
+    this.reflowMonsterFormation();
+    this.currentMonster = this.syncCurrentMonster();
   }
 
   autoAttack() {
-    if (this.devPanelOpen || !gameState.isPlayerAlive || !this.currentMonster || this.currentMonster.hp <= 0 || this.currentMonster.isApproaching) return;
-    const monster = this.currentMonster;
+    if (this.devPanelOpen || !gameState.isPlayerAlive) return;
+    const attackOriginX = this.player.x + 28;
+    const inRangeMonster = this.activeMonsters
+      .filter((monster) => monster && monster.hp > 0 && monster.sprite && !monster.sprite.destroyed)
+      .sort((left, right) => Math.abs(this.player.x - left.sprite.x) - Math.abs(this.player.x - right.sprite.x))[0];
+
+    if (!inRangeMonster || Math.abs(this.player.x - inRangeMonster.sprite.x) > 170) {
+      this.currentMonster = this.syncCurrentMonster();
+      return;
+    }
+
+    this.currentMonster = inRangeMonster;
     const isCrit = Math.random() * 100 < getFinalCritRate(gameState);
     let damage = getFinalAtk(gameState);
     if (isCrit) damage = Math.floor(damage * (getFinalCritDamage(gameState) / 100));
-    const slash = this.add.rectangle(this.player.x + 20, this.player.y, 20, 6, isCrit ? 0xffea00 : 0x00e5ff);
+    const slash = this.add.rectangle(attackOriginX, this.player.y, 20, 6, isCrit ? 0xffea00 : 0x00e5ff);
     this.tweens.add({
-      targets: slash, x: monster.sprite.x, duration: 100,
-      onComplete: () => { slash.destroy(); this.damageMonster(monster, damage, isCrit); }
+      targets: slash, x: inRangeMonster.sprite.x, duration: 100,
+      onComplete: () => { slash.destroy(); this.damageMonster(inRangeMonster, damage, isCrit); }
     });
   }
 
   damageMonster(monster, amount, isCrit) {
-    if (this.devPanelOpen || this.currentMonster !== monster || monster.hp <= 0 || !gameState.isPlayerAlive) return;
+    if (this.devPanelOpen || !monster || monster.hp <= 0 || !gameState.isPlayerAlive) return;
     monster.hp -= amount;
     const dmgText = this.add.text(
       monster.sprite.x + Math.floor(Math.random() * 20 - 10), 170,
@@ -592,6 +749,10 @@ export default class MainScene extends Phaser.Scene {
     this.attackTimer = null;
     this.spawnTimer?.remove(false);
     this.spawnTimer = null;
+    for (const timer of this.monsterAttackTimers) {
+      timer?.remove(false);
+    }
+    this.monsterAttackTimers = [];
     this.destroyCurrentMonster();
     const rebirthed = gameState.rebirthUnlocked;
     if (rebirthed) {
@@ -619,7 +780,15 @@ export default class MainScene extends Phaser.Scene {
   }
 
   killMonster(monster) {
-    if (this.currentMonster !== monster) return;
+    if (!monster || !this.activeMonsters.includes(monster)) return;
+    monster.attackTimer?.remove(false);
+    this.monsterAttackTimers = this.monsterAttackTimers.filter((timer) => timer !== monster.attackTimer);
+    monster.attackTimer = null;
+    monster.approachTween?.stop();
+    monster.sprite?.destroy();
+    monster.hpText?.destroy();
+    this.activeMonsters = this.activeMonsters.filter((activeMonster) => activeMonster !== monster);
+    this.reflowMonsterFormation();
     gameState.spiritPower += getSpiritPowerReward(
       gameState.stage,
       gameState.round,
@@ -632,15 +801,17 @@ export default class MainScene extends Phaser.Scene {
       this.showCombatNotice(`법보 획득: ${getArtifact(droppedArtifact).name}`);
     }
     Object.assign(gameState, getProgressAfterMonsterDefeat(gameState));
-    this.destroyCurrentMonster();
+    this.currentMonster = this.syncCurrentMonster();
     if (gameState.isBossStage || monster.isBoss) {
       this.startStage();
     } else {
       this.updateUI();
-      this.spawnTimer = this.time.delayedCall(200, () => {
-        this.spawnTimer = null;
-        this.spawnMonsterWithApproach();
-      });
+      if (!this.activeMonsters.length) {
+        this.spawnTimer = this.time.delayedCall(200, () => {
+          this.spawnTimer = null;
+          this.spawnMonsterWithApproach();
+        });
+      }
     }
   }
 
@@ -649,10 +820,10 @@ export default class MainScene extends Phaser.Scene {
       const bossTitle = gameState.round === 25 ? 'FINAL BOSS' : 'ROUND BOSS';
       this.stageText.setText(`STAGE ${gameState.stage} · ROUND ${gameState.round}/25 [${bossTitle}]`);
     } else {
-      this.stageText.setText(`STAGE ${gameState.stage} · ROUND ${gameState.round}/25 (${gameState.roundMonsterKills}/50)`);
+      this.stageText.setText(`STAGE ${gameState.stage} · ROUND ${gameState.round}/25 (${gameState.roundMonsterKills}/${ROUND_MONSTER_COUNT})`);
     }
-    this.spiritPowerText.setText(`영력: ${gameState.spiritPower.toLocaleString()}`);
-    this.karmaText.setText(`업: ${gameState.karma.toLocaleString()}`);
+    this.spiritPowerText.setText(`영력: ${formatNumberShort(gameState.spiritPower)}`);
+    this.karmaText.setText(`업: ${formatNumberShort(gameState.karma)}`);
     this.atkText.setText(`공격력: ${getFinalAtk(gameState)} (일반 Lv.${gameState.atkLevel} / 영구 +${gameState.permAtkLevel * 10}%)`);
     this.critText.setText(`치명타: ${getFinalCritRate(gameState)}% (Lv.${gameState.critRateLevel})`);
     this.spdText.setText(`공격속도: ${(1000 / getFinalAtkSpeed(gameState)).toFixed(2)}회/초 (Lv.${gameState.atkSpeedLevel})`);
@@ -715,8 +886,8 @@ export default class MainScene extends Phaser.Scene {
     this.btnRebirthUpgradesTab.setFillStyle(isRebirthTab && !isConstitutionTab ? 0x4cc9f0 : 0x3d405b);
     this.btnConstitutionTab.setFillStyle(isConstitutionTab ? 0x4cc9f0 : 0x3d405b);
     this.updateStatUpgradeLabels();
-    this.btnPermAtkUpgrade.label.setText(`영구 공격력 (+10%) - ${getPermAtkCost(gameState)} 업 (Lv.${gameState.permAtkLevel})`);
-    this.btnPermGoldUpgrade.label.setText(`영구 영력 획득량 (+15%) - ${getPermSpiritPowerCost(gameState)} 업 (Lv.${gameState.permSpiritPowerLevel})`);
+    this.btnPermAtkUpgrade.label.setText(`영구 공격력 (+10%) - ${formatNumberShort(getPermAtkCost(gameState))} 업 (Lv.${gameState.permAtkLevel})`);
+    this.btnPermGoldUpgrade.label.setText(`영구 영력 획득량 (+15%) - ${formatNumberShort(getPermSpiritPowerCost(gameState))} 업 (Lv.${gameState.permSpiritPowerLevel})`);
     this.updateConstitutionLabels();
 
     this.btnRebirth.label.setText(gameState.rebirthUnlocked ? '🌀 환생하기' : '🌀 5라운드 보스 처치 후 환생 가능');
@@ -729,7 +900,7 @@ export default class MainScene extends Phaser.Scene {
     this.constitutionInfo.setText(
       selected
         ? `이번 환생 체질: ${selected.name} · 다음 환생 전까지 변경 불가`
-        : `이번 환생에서 하나를 구매할 수 있습니다.\n현재 업: ${gameState.karma.toLocaleString()}`
+        : `이번 환생에서 하나를 구매할 수 있습니다.\n현재 업: ${formatNumberShort(gameState.karma)}`
     );
 
     for (const constitution of this.constitutionButtons) {
@@ -757,7 +928,7 @@ export default class MainScene extends Phaser.Scene {
     if (this.rebirthSelectionPending) {
       this.techniqueInfo.setText(
         `환생 공법을 선택하세요. 선택하면 환생이 완료됩니다.\n` +
-        `보유 업: ${gameState.karma.toLocaleString()}${this.pendingAutomaticRebirth ? '\n자동 환생 대기 중' : ''}`
+        `보유 업: ${formatNumberShort(gameState.karma)}${this.pendingAutomaticRebirth ? '\n자동 환생 대기 중' : ''}`
       );
       return;
     }
@@ -787,7 +958,7 @@ export default class MainScene extends Phaser.Scene {
     const isMaxed = gameState.techniqueLevel >= MAX_TECHNIQUE_LEVEL;
     const cost = getTechniqueUpgradeCost(gameState);
     this.btnTechniqueUpgrade.label.setText(
-      isMaxed ? '공법 최대 레벨' : `공법 강화 · ${cost.toLocaleString()} 영력`
+      isMaxed ? '공법 최대 레벨' : `공법 강화 · ${formatNumberShort(cost)} 영력`
     );
     this.btnTechniqueUpgrade.setFillStyle(!isMaxed && gameState.spiritPower >= cost ? 0x7209b7 : 0x555555);
   }
@@ -826,7 +997,7 @@ export default class MainScene extends Phaser.Scene {
       const maxed = this.isStatMaxed(stat.key);
       const label = maxed
         ? `${labels[stat.key]} · MAX`
-        : `${labels[stat.key]} · ${stat.cost(gameState).toLocaleString()} 영력`;
+        : `${labels[stat.key]} · ${formatNumberShort(stat.cost(gameState))} 영력`;
       stat.button.label.setText(label).setFontSize('11px');
       stat.button.setFillStyle(maxed ? 0x555555 : stat.color);
     }

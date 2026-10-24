@@ -1,6 +1,7 @@
 export const RESOURCE_SCALE = 100;
 export const STAGE_ROUND_COUNT = 25;
-export const ROUND_MONSTER_COUNT = 50;
+export const ROUND_MONSTER_COUNT = 30;
+export const MONSTER_SPAWN_COUNT = 3;
 export const REBIRTH_UNLOCK_ROUND = 5;
 export const BASE_MONSTER_APPROACH_DURATION = 500;
 export const MIN_MONSTER_APPROACH_DURATION = 150;
@@ -34,6 +35,38 @@ export const ARTIFACTS = [
   { id: 'black-tortoise-armor', name: '현무갑', tier: 'upper', atkBonus: 0, healthBonus: 0.15, critRateBonus: 0 },
   { id: 'time-wheel', name: '시간륜', tier: 'immortal', atkBonus: 0, healthBonus: 0, critRateBonus: 5 }
 ];
+export const NUMBER_SUFFIXES = ['', '만', '억', '조', '경', '해', '자', '양', '구', '간', '정', '재', '극', '항하사', '아승기', '나유타', '불가사의', '무량대수'];
+
+export function formatNumberShort(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '0';
+
+  const sign = numeric < 0 ? '-' : '';
+  const absoluteValue = Math.abs(numeric);
+
+  if (absoluteValue < 1000) return `${sign}${Math.floor(absoluteValue)}`;
+
+  let scale = 1;
+  let suffix = '';
+  for (let index = 1; index < NUMBER_SUFFIXES.length; index += 1) {
+    const nextScale = 10 ** (4 * index);
+    if (absoluteValue >= nextScale) {
+      scale = nextScale;
+      suffix = NUMBER_SUFFIXES[index];
+    } else {
+      break;
+    }
+  }
+
+  if (!suffix) {
+    return `${sign}${Math.floor(absoluteValue)}`;
+  }
+
+  const scaledValue = absoluteValue / scale;
+  const limitedValue = Number(scaledValue.toPrecision(4));
+  const compactText = String(limitedValue).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+  return `${sign}${compactText}${suffix}`;
+}
 
 function scaleResource(value) {
   return value * RESOURCE_SCALE;
