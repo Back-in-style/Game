@@ -171,8 +171,146 @@ export default class MainScene extends Phaser.Scene {
     this.input.on('pointerup', this.endStatsScroll, this);
     this.input.on('pointerupoutside', this.endStatsScroll, this);
 
+    this.createDeveloperPanel();
+    this.input.keyboard.on('keydown-F2', this.toggleDeveloperPanel, this);
+    this.input.keyboard.on('keydown-ESC', () => {
+      if (this.devPanelOpen) this.setDeveloperPanelOpen(false);
+    });
+
     this.startStage();
     this.startAutoAttackTimer();
+  }
+
+  createDeveloperPanel() {
+    this.devPanel = this.add.container(0, 0).setDepth(100).setVisible(false);
+    this.devPanel.add(
+      this.add.rectangle(200, 300, 400, 600, 0x090a10, 0.96).setInteractive()
+    );
+    this.devPanel.add(
+      this.add.text(200, 30, '테스트 조정 도구', {
+        fontSize: '20px',
+        fill: '#ffffff',
+        fontStyle: 'bold'
+      }).setOrigin(0.5)
+    );
+    this.devPanel.add(
+      this.add.text(200, 58, 'F2 또는 닫기로 돌아가기 · 변경값은 새로고침 시 초기화', {
+        fontSize: '10px',
+        fill: '#b8b8c8'
+      }).setOrigin(0.5)
+    );
+
+    const closeButton = this.button(355, 30, 70, 28, 0x555555, '닫기', 11);
+    closeButton.on('pointerdown', () => this.setDeveloperPanelOpen(false));
+    this.devPanel.add([closeButton, closeButton.label]);
+
+    this.devRows = [
+      { key: 'spiritPower', label: '영력', step: 10000, min: 0, max: Number.MAX_SAFE_INTEGER },
+      { key: 'karma', label: '업', step: 10, min: 0, max: Number.MAX_SAFE_INTEGER },
+      { key: 'stage', label: '스테이지', step: 1, min: 1, max: 1000 },
+      { key: 'round', label: '라운드', step: 1, min: 1, max: 25 },
+      { key: 'atkLevel', label: '공격력 Lv', step: 1, min: 1, max: 10000 },
+      { key: 'healthLevel', label: '체력 Lv', step: 1, min: 0, max: 10000 },
+      { key: 'critRateLevel', label: '치명타 확률 Lv', step: 1, min: 0, max: 600 },
+      { key: 'critDamageLevel', label: '치명타 피해 Lv', step: 1, min: 0, max: 350 },
+      { key: 'atkSpeedLevel', label: '공격속도 Lv', step: 1, min: 0, max: 1000 },
+      { key: 'moveSpeedLevel', label: '이동속도 Lv', step: 1, min: 0, max: 1000 }
+    ].map((row, index) => {
+      const y = 105 + index * 37;
+      const label = this.add.text(35, y, row.label, {
+        fontSize: '12px',
+        fill: '#d8d8e8'
+      }).setOrigin(0, 0.5);
+      const value = this.add.text(240, y, '', {
+        fontSize: '12px',
+        fill: '#ffffff',
+        fontStyle: 'bold'
+      }).setOrigin(0.5);
+      const decrease = this.button(300, y, 38, 26, 0x555555, '−', 15);
+      const increase = this.button(355, y, 38, 26, 0x3d405b, '+', 15);
+      decrease.on('pointerdown', () => this.adjustDeveloperValue(row, -1));
+      increase.on('pointerdown', () => this.adjustDeveloperValue(row, 1));
+      this.devPanel.add([label, value, decrease, decrease.label, increase, increase.label]);
+      return { ...row, value };
+    });
+
+    const healButton = this.button(110, 493, 160, 34, 0x2e7d32, '체력 회복', 12);
+    healButton.on('pointerdown', () => {
+      gameState.currentHealth = getFinalMaxHealth(gameState);
+      this.updateUI();
+    });
+    const rebirthButton = this.button(290, 493, 180, 34, 0x6a1b9a, '', 11);
+    rebirthButton.on('pointerdown', () => {
+      gameState.rebirthUnlocked = !gameState.rebirthUnlocked;
+      this.updateUI();
+    });
+    const restartButton = this.button(200, 540, 340, 34, 0x3d405b, '현재 스테이지에서 전투 재시작', 12);
+    restartButton.on('pointerdown', () => this.restartTestCombat());
+    this.devPanel.add([
+      healButton, healButton.label,
+      rebirthButton, rebirthButton.label,
+      restartButton, restartButton.label
+    ]);
+    this.devRebirthButton = rebirthButton;
+    this.updateDeveloperPanel();
+  }
+
+  toggleDeveloperPanel() {
+    this.setDeveloperPanelOpen(!this.devPanelOpen);
+  }
+
+  setDeveloperPanelOpen(isOpen) {
+    this.devPanelOpen = isOpen;
+    this.devPanel.setVisible(isOpen);
+    if (!isOpen) this.updateUI();
+  }
+
+  updateDeveloperPanel() {
+    if (!this.devRows) return;
+    for (const row of this.devRows) {
+      row.value.setText(gameState[row.key].toLocaleString());
+    }
+    this.devRebirthButton.label.setText(
+      `환생 ${gameState.rebirthUnlocked ? '해금됨' : '잠김'} · 토글`
+    );
+  }
+
+  adjustDeveloperValue(row, direction) {
+    const nextValue = Phaser.Math.Clamp(
+      gameState[row.key] + row.step * direction,
+      row.min,
+      row.max
+    );
+    if (nextValue === gameState[row.key]) return;
+    gameState[row.key] = nextValue;
+
+    if (row.key === 'stage' || row.key === 'round') {
+      gameState.roundMonsterKills = 0;
+      gameState.isBossStage = false;
+      this.restartTestCombat();
+      return;
+    }
+
+    if (row.key === 'healthLevel') {
+      gameState.currentHealth = Math.min(gameState.currentHealth, getFinalMaxHealth(gameState));
+    }
+    if (row.key === 'atkSpeedLevel') this.startAutoAttackTimer();
+    if (row.key === 'moveSpeedLevel') this.restartTestCombat();
+    this.updateUI();
+  }
+
+  restartTestCombat() {
+    this.rebirthSelectionPending = false;
+    this.pendingAutomaticRebirth = false;
+    this.rebirthPausedCombat = false;
+    gameState.isPlayerAlive = true;
+    gameState.playerState = 'WALKING';
+    gameState.currentHealth = getFinalMaxHealth(gameState);
+    gameState.roundMonsterKills = 0;
+    gameState.isBossStage = false;
+    this.destroyCurrentMonster();
+    this.startAutoAttackTimer();
+    this.startStage();
   }
 
   button(x, y, width, height, color, label = '', fontSize = 14) {
@@ -232,7 +370,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   isStatMaxed(statKey) {
-    if (statKey === 'critRateLevel') return getFinalCritRate(gameState) >= 100;
+    if (statKey === 'critRateLevel') return gameState.critRateLevel >= 600;
     if (statKey === 'critDamageLevel') return getFinalCritDamage(gameState) >= 500;
     if (statKey === 'atkSpeedLevel') return getFinalAtkSpeed(gameState) <= 100;
     if (statKey === 'moveSpeedLevel') return getMonsterApproachDuration(gameState) <= 150;
@@ -388,7 +526,7 @@ export default class MainScene extends Phaser.Scene {
     this.playerBounceTween.resume();
     const isBoss = gameState.isBossStage;
     const isFinalBoss = isBoss && gameState.round === 25;
-    const hp = getMonsterMaxHp(gameState.stage, gameState.round, isBoss);
+    const hp = getMonsterMaxHp(gameState.stage, gameState.round, isBoss, gameState.realmIndex);
     const size = isBoss ? (isFinalBoss ? 72 : 60) : 40;
     const color = isBoss ? (isFinalBoss ? 0x6a040f : 0x9d0208) : 0xef233c;
     const sprite = this.add.rectangle(450, 200, size, size, color);
@@ -413,7 +551,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   autoAttack() {
-    if (!gameState.isPlayerAlive || !this.currentMonster || this.currentMonster.hp <= 0 || this.currentMonster.isApproaching) return;
+    if (this.devPanelOpen || !gameState.isPlayerAlive || !this.currentMonster || this.currentMonster.hp <= 0 || this.currentMonster.isApproaching) return;
     const monster = this.currentMonster;
     const isCrit = Math.random() * 100 < getFinalCritRate(gameState);
     let damage = getFinalAtk(gameState);
@@ -426,7 +564,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   damageMonster(monster, amount, isCrit) {
-    if (this.currentMonster !== monster || monster.hp <= 0 || !gameState.isPlayerAlive) return;
+    if (this.devPanelOpen || this.currentMonster !== monster || monster.hp <= 0 || !gameState.isPlayerAlive) return;
     monster.hp -= amount;
     const dmgText = this.add.text(
       monster.sprite.x + Math.floor(Math.random() * 20 - 10), 170,
@@ -440,7 +578,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   damagePlayer(amount) {
-    if (!gameState.isPlayerAlive) return;
+    if (this.devPanelOpen || !gameState.isPlayerAlive) return;
     gameState.currentHealth = Math.max(0, gameState.currentHealth - amount);
     this.updateUI();
     if (gameState.currentHealth === 0) this.handlePlayerDeath();
@@ -482,7 +620,12 @@ export default class MainScene extends Phaser.Scene {
 
   killMonster(monster) {
     if (this.currentMonster !== monster) return;
-    gameState.spiritPower += getSpiritPowerReward(gameState.stage, monster.isBoss, gameState.permSpiritPowerLevel);
+    gameState.spiritPower += getSpiritPowerReward(
+      gameState.stage,
+      gameState.round,
+      monster.isBoss,
+      gameState.permSpiritPowerLevel
+    );
     const droppedArtifact = getArtifactDrop(monster.isBoss);
     if (droppedArtifact) {
       gameState.artifacts.push(droppedArtifact);
@@ -578,6 +721,7 @@ export default class MainScene extends Phaser.Scene {
 
     this.btnRebirth.label.setText(gameState.rebirthUnlocked ? '🌀 환생하기' : '🌀 5라운드 보스 처치 후 환생 가능');
     this.btnRebirth.setFillStyle(gameState.rebirthUnlocked ? 0xaa00ff : 0x555555);
+    this.updateDeveloperPanel();
   }
 
   updateConstitutionLabels() {
@@ -672,9 +816,9 @@ export default class MainScene extends Phaser.Scene {
     const labels = {
       atkLevel: `공격력 Lv.${gameState.atkLevel} · +2`,
       healthLevel: `체력 Lv.${gameState.healthLevel} · 최대 체력 +20`,
-      critRateLevel: `치명타 확률 ${getFinalCritRate(gameState)}% · +1%`,
-      critDamageLevel: `치명타 피해 ${getFinalCritDamage(gameState)}% · +10%p`,
-      atkSpeedLevel: `공격속도 Lv.${gameState.atkSpeedLevel} · 간격 -30ms`,
+      critRateLevel: `치명타 확률 ${getFinalCritRate(gameState)}% · +0.1%p`,
+      critDamageLevel: `치명타 피해 ${getFinalCritDamage(gameState)}% · +1%p`,
+      atkSpeedLevel: `공격속도 Lv.${gameState.atkSpeedLevel} · 간격 ${getFinalAtkSpeed(gameState)}ms`,
       moveSpeedLevel: `이동속도 Lv.${gameState.moveSpeedLevel} · 접근 ${getMonsterApproachDuration(gameState)}ms`
     };
 

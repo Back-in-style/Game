@@ -1,3 +1,4 @@
+export const RESOURCE_SCALE = 100;
 export const STAGE_ROUND_COUNT = 25;
 export const ROUND_MONSTER_COUNT = 50;
 export const REBIRTH_UNLOCK_ROUND = 5;
@@ -34,36 +35,40 @@ export const ARTIFACTS = [
   { id: 'time-wheel', name: '시간륜', tier: 'immortal', atkBonus: 0, healthBonus: 0, critRateBonus: 5 }
 ];
 
+function scaleResource(value) {
+  return value * RESOURCE_SCALE;
+}
+
 export function getAtkCost(state) {
-  return Math.floor(10 * Math.pow(1.12, state.atkLevel - 1));
+  return scaleResource(10 * Math.pow(1.08, Math.max(0, state.atkLevel - 1)));
 }
 
 export function getCritCost(state) {
-  return Math.floor(20 * Math.pow(1.6, state.critRateLevel));
+  return 100000 * Math.pow(1.0005, state.critRateLevel);
 }
 
 export function getHealthCost(state) {
-  return Math.floor(20 * Math.pow(1.2, state.healthLevel));
+  return scaleResource(10 * Math.pow(1.08, state.healthLevel));
 }
 
 export function getCritDamageCost(state) {
-  return Math.floor(50 * Math.pow(1.5, state.critDamageLevel));
+  return 5000 * Math.pow(1.005, state.critDamageLevel);
 }
 
 export function getSpdCost(state) {
-  return Math.floor(30 * Math.pow(1.7, state.atkSpeedLevel));
+  return 10000 * Math.pow(1.003, state.atkSpeedLevel);
 }
 
 export function getMoveSpeedCost(state) {
-  return Math.floor(25 * Math.pow(1.4, state.moveSpeedLevel));
+  return 50000 * Math.pow(1.005, state.moveSpeedLevel);
 }
 
 export function getPermAtkCost(state) {
-  return Math.floor(1 * Math.pow(1.5, state.permAtkLevel));
+  return scaleResource(1 * Math.pow(1.5, state.permAtkLevel));
 }
 
 export function getPermSpiritPowerCost(state) {
-  return Math.floor(1 * Math.pow(1.5, state.permSpiritPowerLevel));
+  return scaleResource(1 * Math.pow(1.5, state.permSpiritPowerLevel));
 }
 
 export function getConstitution(constitutionId) {
@@ -83,7 +88,7 @@ export function getTechnique(techniqueId) {
 }
 
 export function getTechniqueUpgradeCost(state) {
-  return Math.floor(50 * Math.pow(1.5, state.techniqueLevel));
+  return scaleResource(5 * Math.pow(1.5, state.techniqueLevel));
 }
 
 export function getTechniqueEvolutionForRealm(realmIndex) {
@@ -147,7 +152,8 @@ export function getFinalAtk(state) {
 }
 
 export function getFinalCritRate(state) {
-  return Math.min(100, state.baseCritRate + state.critRateLevel + getArtifactBonuses(state.artifacts).critRateBonus);
+  const upgradeValue = Math.min(60, state.critRateLevel * 0.1);
+  return Math.min(100, state.baseCritRate + upgradeValue + getArtifactBonuses(state.artifacts).critRateBonus);
 }
 
 export function getFinalMaxHealth(state) {
@@ -163,25 +169,29 @@ export function getFinalMaxHealth(state) {
 }
 
 export function getFinalCritDamage(state) {
-  return Math.min(500, state.baseCritDmg + state.critDamageLevel * 10);
+  return Math.min(500, state.baseCritDmg + state.critDamageLevel);
 }
 
 export function getFinalAtkSpeed(state) {
-  return Math.max(100, state.baseAtkSpeed - state.atkSpeedLevel * 30);
+  const speedMultiplier = 1 + state.atkSpeedLevel * 0.01;
+  return Math.max(100, Math.floor(state.baseAtkSpeed / speedMultiplier));
 }
 
 export function getMonsterApproachDuration(state) {
+  const speedMultiplier = 1 + state.moveSpeedLevel * 0.01;
   return Math.max(
     MIN_MONSTER_APPROACH_DURATION,
-    BASE_MONSTER_APPROACH_DURATION - state.moveSpeedLevel * 25
+    Math.floor(BASE_MONSTER_APPROACH_DURATION / speedMultiplier)
   );
 }
 
-export function getMonsterMaxHp(stage, round, isBoss) {
-  const baseHp = Math.floor(15 * Math.pow(1.15, stage - 1));
-  const roundHp = Math.floor(baseHp * (1 + (round - 1) * 0.05));
-  const bossMultiplier = isBoss ? (round === STAGE_ROUND_COUNT ? 10 : 5) : 1;
-  return roundHp * bossMultiplier;
+export function getMonsterMaxHp(stage, round, isBoss, realmIndex = 0) {
+  const realmMultiplier = getRealmMultiplier(realmIndex);
+  const stageGrowth = Math.pow(1.005, stage - 1);
+  const roundGrowth = Math.pow(1.005, round - 1);
+  const baseHp = Math.floor(10 * realmMultiplier * stageGrowth * roundGrowth);
+  const bossMultiplier = isBoss ? (round === STAGE_ROUND_COUNT ? 15 : 10) : 1;
+  return baseHp * bossMultiplier;
 }
 
 export function getMonsterAttackDamage(stage, round, isBoss) {
@@ -197,11 +207,13 @@ export function getRealmPromotionRound(realmIndex) {
   return REALM_PROMOTION_ROUNDS[realmIndex] ?? null;
 }
 
-export function getSpiritPowerReward(stage, isBoss, permSpiritPowerLevel) {
-  const baseReward = stage * 8;
+export function getSpiritPowerReward(stage, round, isBoss, permSpiritPowerLevel) {
+  const stageGrowth = Math.pow(1.1, stage - 1);
+  const roundGrowth = Math.pow(1.02, Math.floor((round - 1) / 5));
+  const baseReward = 10 * stageGrowth * roundGrowth;
   const bossMultiplier = isBoss ? 5 : 1;
   const permBuff = 1 + permSpiritPowerLevel * 0.15;
-  return Math.floor(baseReward * bossMultiplier * permBuff);
+  return scaleResource(baseReward * bossMultiplier * permBuff);
 }
 
 export function getKarmaForRoundBoss() {

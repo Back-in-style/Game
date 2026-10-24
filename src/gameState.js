@@ -30,7 +30,7 @@ export const gameState = {
   artifacts: [],
   currentTab: 'stats',
   baseAtk: 5,
-  baseCritRate: 10,
+  baseCritRate: 0,
   baseCritDmg: 150,
   baseAtkSpeed: 800
 };
