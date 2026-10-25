@@ -2,6 +2,14 @@ export const RESOURCE_SCALE = 100;
 export const STAGE_ROUND_COUNT = 25;
 export const ROUND_MONSTER_COUNT = 30;
 export const MONSTER_SPAWN_COUNT = 3;
+export const BOSS_SPAWN_COUNT = 1;
+export const MONSTER_ATTACK_RANGE = 170;
+export const BOSS_ATTACK_RANGE = 250;
+export const BOSS_MONSTER_ATTACK_RANGE = 250;
+export const MONSTER_LANE_X_POSITIONS = [220, 286, 352];
+export const MONSTER_GROUP_ENTRY_OFFSET = 180;
+export const MONSTER_GROUP_ENTRY_DURATION = 500;
+export const MONSTER_FORMATION_SHIFT_DURATION = 300;
 export const REBIRTH_UNLOCK_ROUND = 5;
 export const BASE_MONSTER_APPROACH_DURATION = 500;
 export const MIN_MONSTER_APPROACH_DURATION = 150;
@@ -36,6 +44,39 @@ export const ARTIFACTS = [
   { id: 'time-wheel', name: '시간륜', tier: 'immortal', atkBonus: 0, healthBonus: 0, critRateBonus: 5 }
 ];
 export const NUMBER_SUFFIXES = ['', '만', '억', '조', '경', '해', '자', '양', '구', '간', '정', '재', '극', '항하사', '아승기', '나유타', '불가사의', '무량대수'];
+
+export function getMonsterFormationLaneIndexes(monsterCount) {
+  if (monsterCount === 1) return [1];
+  if (monsterCount === 2) return [1, 2];
+  if (monsterCount === MONSTER_SPAWN_COUNT) return [0, 1, 2];
+  throw new RangeError(`Unsupported monster group size: ${monsterCount}`);
+}
+
+export function getMonsterLaneX(laneIndex) {
+  if (!Number.isInteger(laneIndex) || laneIndex < 0 || laneIndex >= MONSTER_LANE_X_POSITIONS.length) {
+    throw new RangeError(`Invalid monster lane index: ${laneIndex}`);
+  }
+  return MONSTER_LANE_X_POSITIONS[laneIndex];
+}
+
+export function getPlayerAttackRange(isBoss) {
+  return isBoss ? BOSS_ATTACK_RANGE : MONSTER_ATTACK_RANGE;
+}
+
+export function getMonsterFormationAssignments(monsters, isBossGroup = false) {
+  if (!Array.isArray(monsters)) throw new TypeError('Monsters must be provided as an array.');
+  const orderedMonsters = monsters.slice().sort(
+    (left, right) => (left.laneIndex ?? 0) - (right.laneIndex ?? 0)
+  );
+  const initialLaneIndexes = getMonsterFormationLaneIndexes(orderedMonsters.length);
+  const laneIndexes = isBossGroup
+    ? initialLaneIndexes
+    : initialLaneIndexes.map((_, index) => index);
+  return orderedMonsters.map((monster, index) => {
+    const laneIndex = laneIndexes[index];
+    return { monster, laneIndex, x: getMonsterLaneX(laneIndex) };
+  });
+}
 
 export function formatNumberShort(value) {
   const numeric = Number(value);
@@ -82,6 +123,14 @@ export function getCritCost(state) {
 
 export function getHealthCost(state) {
   return scaleResource(10 * Math.pow(1.08, state.healthLevel));
+}
+
+export function getRecoveryCost(state) {
+  return 1000 * Math.pow(1.08, state.recoveryLevel);
+}
+
+export function getRecoveryAmount(state) {
+  return 1 + state.recoveryLevel;
 }
 
 export function getCritDamageCost(state) {
@@ -229,8 +278,8 @@ export function getMonsterMaxHp(stage, round, isBoss, realmIndex = 0) {
 
 export function getMonsterAttackDamage(stage, round, isBoss) {
   const baseDamage = 10 + (stage - 1) * 2 + round - 1;
-  if (!isBoss) return baseDamage;
-  return baseDamage * (round === STAGE_ROUND_COUNT ? 5 : 3);
+  const bossMultiplier = isBoss ? (round === STAGE_ROUND_COUNT ? 5 : 3) : 1;
+  return Math.floor(baseDamage * bossMultiplier * 0.3);
 }
 
 export function getRealmPromotionRound(realmIndex) {
@@ -304,6 +353,7 @@ export function getRebirthResetState(state) {
     spiritPower: 0,
     atkLevel: 1,
     healthLevel: 0,
+    recoveryLevel: 0,
     critRateLevel: 0,
     critDamageLevel: 0,
     atkSpeedLevel: 0,

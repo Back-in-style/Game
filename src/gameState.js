@@ -9,6 +9,7 @@ export const gameState = {
   karma: 0,
   atkLevel: 1,
   healthLevel: 0,
+  recoveryLevel: 0,
   critRateLevel: 0,
   critDamageLevel: 0,
   atkSpeedLevel: 0,
@@ -32,5 +33,5 @@ export const gameState = {
   baseAtk: 5,
   baseCritRate: 0,
   baseCritDmg: 150,
-  baseAtkSpeed: 800
+  baseAtkSpeed: 1000
 };

@@ -1,13 +1,17 @@
 import Phaser from 'phaser';
 import { gameState } from './gameState.js';
 import {
-  getAtkCost, getCritCost, getHealthCost, getCritDamageCost, getSpdCost, getMoveSpeedCost,
+  getAtkCost, getCritCost, getHealthCost, getRecoveryCost, getRecoveryAmount,
+  getCritDamageCost, getSpdCost, getMoveSpeedCost,
   getPermAtkCost, getPermSpiritPowerCost,
   getConstitution, getConstitutionCost, CONSTITUTIONS,
   getTechnique, getTechniqueUpgradeCost, getTechniqueEvolutionForRealm, getTechniqueEffectMultiplier,
   TECHNIQUES, MAX_TECHNIQUE_LEVEL,
   ARTIFACTS, ARTIFACT_TIERS, getArtifact, getArtifactBonuses, getArtifactDrop, getArtifactDropRate,
-  ROUND_MONSTER_COUNT, MONSTER_SPAWN_COUNT,
+  ROUND_MONSTER_COUNT, MONSTER_SPAWN_COUNT, BOSS_SPAWN_COUNT,
+  MONSTER_ATTACK_RANGE, BOSS_MONSTER_ATTACK_RANGE, getMonsterFormationLaneIndexes,
+  getMonsterFormationAssignments, getMonsterLaneX, getPlayerAttackRange,
+  MONSTER_GROUP_ENTRY_OFFSET, MONSTER_GROUP_ENTRY_DURATION, MONSTER_FORMATION_SHIFT_DURATION,
   formatNumberShort,
   getFinalAtk, getFinalCritRate, getFinalCritDamage, getFinalMaxHealth, getFinalAtkSpeed,
   getRealmPromotionRound, getMonsterApproachDuration, getMonsterMaxHp, getMonsterAttackDamage,
@@ -42,8 +46,7 @@ export default class MainScene extends Phaser.Scene {
     this.playerHealthBar = this.add.rectangle(155, 140, 225, 8, 0x4caf50).setOrigin(0, 0.5);
 
     this.player = this.add.rectangle(80, 200, 35, 35, 0x29b6f6);
-    this.playerLabel = this.add.text(80, 170, '용사', { fontSize: '12px', fill: '#ffffff' }).setOrigin(0.5);
-    this.playerBounceTween = this.tweens.add({ targets: [this.player, this.playerLabel], y: '-=4', duration: 200, yoyo: true, repeat: -1 });
+    this.playerLabel = this.add.text(80, 170, '플레이어', { fontSize: '12px', fill: '#ffffff' }).setOrigin(0.5);
 
     this.panelTitle = this.add.text(200, 302, '', { fontSize: '16px', fill: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
     this.panelPlaceholder = this.add.text(200, 405, '', {
@@ -111,10 +114,11 @@ export default class MainScene extends Phaser.Scene {
     this.statsUpgradeButtons = [
       { key: 'atkLevel', cost: getAtkCost, color: 0xd90429, y: 360 },
       { key: 'healthLevel', cost: getHealthCost, color: 0x43a047, y: 406 },
-      { key: 'critRateLevel', cost: getCritCost, color: 0xf77f00, y: 452 },
-      { key: 'critDamageLevel', cost: getCritDamageCost, color: 0xe53935, y: 498 },
-      { key: 'atkSpeedLevel', cost: getSpdCost, color: 0x00b4d8, y: 544 },
-      { key: 'moveSpeedLevel', cost: getMoveSpeedCost, color: 0x00897b, y: 590 }
+      { key: 'recoveryLevel', cost: getRecoveryCost, color: 0x8bc34a, y: 452 },
+      { key: 'critRateLevel', cost: getCritCost, color: 0xf77f00, y: 498 },
+      { key: 'critDamageLevel', cost: getCritDamageCost, color: 0xe53935, y: 544 },
+      { key: 'atkSpeedLevel', cost: getSpdCost, color: 0x00b4d8, y: 590 },
+      { key: 'moveSpeedLevel', cost: getMoveSpeedCost, color: 0x00897b, y: 636 }
     ].map((stat) => {
       const button = this.button(198, stat.y, 330, 38, stat.color);
       this.statsPanel.add([button, button.label]);
@@ -216,6 +220,7 @@ export default class MainScene extends Phaser.Scene {
       { key: 'round', label: '라운드', step: 1, min: 1, max: 25 },
       { key: 'atkLevel', label: '공격력 Lv', step: 1, min: 1, max: 10000 },
       { key: 'healthLevel', label: '체력 Lv', step: 1, min: 0, max: 10000 },
+      { key: 'recoveryLevel', label: '회복 Lv', step: 1, min: 0, max: 10000 },
       { key: 'critRateLevel', label: '치명타 확률 Lv', step: 1, min: 0, max: 600 },
       { key: 'critDamageLevel', label: '치명타 피해 Lv', step: 1, min: 0, max: 350 },
       { key: 'atkSpeedLevel', label: '공격속도 Lv', step: 1, min: 0, max: 1000 },
@@ -435,11 +440,11 @@ export default class MainScene extends Phaser.Scene {
   }
 
   update(_time, delta) {
-    if (gameState.playerState === 'WALKING' && this.bgTile) this.bgTile.tilePositionX += 2.5;
     if (gameState.isPlayerAlive) {
       this.updatePlayerMovement(delta);
       this.updateMonsterApproach(delta);
     }
+    if (gameState.playerState === 'WALKING' && this.bgTile) this.bgTile.tilePositionX += 2.5;
   }
 
   updatePlayerMovement() {
@@ -466,31 +471,67 @@ export default class MainScene extends Phaser.Scene {
       return;
     }
 
-    const attackRange = 170;
-    gameState.playerState = Math.abs(this.player.x - nearestMonster.monster.sprite.x) <= attackRange ? 'ATTACKING' : 'WALKING';
+    if (this.activeMonsters.some((monster) => monster.isMoving)) {
+      gameState.playerState = 'WALKING';
+      return;
+    }
+
+    const nearest = nearestMonster.monster;
+    gameState.playerState = Math.abs(this.player.x - nearest.sprite.x) <= getPlayerAttackRange(nearest.isBoss)
+      ? 'ATTACKING'
+      : 'WALKING';
   }
 
   updateMonsterApproach(delta) {
     const step = (120 * delta) / 1000;
-    const attackRange = 170;
+    const groups = new Map();
 
     for (const monster of this.activeMonsters) {
       if (!monster || monster.hp <= 0 || !monster.sprite || monster.sprite.destroyed) continue;
+      if (!groups.has(monster.groupIndex)) groups.set(monster.groupIndex, []);
+      groups.get(monster.groupIndex).push(monster);
+    }
 
-      monster.sprite.y = this.player.y;
-      if (monster.hpText) {
-        monster.hpText.x = monster.sprite.x;
-        monster.hpText.y = monster.sprite.y - 20;
-      }
+    for (const groupMonsters of groups.values()) {
+      const frontMonster = groupMonsters
+        .slice()
+        .sort((left, right) => left.laneIndex - right.laneIndex)[0];
+      if (frontMonster.isMoving) continue;
 
-      const distance = Math.abs(this.player.x - monster.sprite.x);
+      const distance = Math.abs(this.player.x - frontMonster.sprite.x);
+      const attackRange = getPlayerAttackRange(frontMonster.isBoss);
       if (distance > attackRange) {
-        const targetX = monster.targetX ?? monster.sprite.x;
-        const direction = targetX > monster.sprite.x ? 1 : -1;
-        monster.sprite.x += direction * Math.min(step, Math.abs(targetX - monster.sprite.x));
-        if (monster.hpText) monster.hpText.x = monster.sprite.x;
+        const targetX = this.player.x + attackRange;
+        const nextX = Math.max(targetX, frontMonster.sprite.x - step);
+        this.setMonsterRenderPosition(frontMonster, nextX, this.player.y);
+      } else {
+        this.setMonsterRenderPosition(frontMonster, frontMonster.sprite.x, this.player.y);
       }
     }
+  }
+
+  setMonsterRenderPosition(monster, x, y) {
+    monster.sprite.setPosition(x, y);
+    monster.hpText?.setPosition(x, y - 20);
+  }
+
+  moveMonsterToLane(monster, duration) {
+    monster.motionTween?.stop();
+    monster.isMoving = true;
+    monster.motionTween = this.tweens.add({
+      targets: [monster.sprite, monster.hpText],
+      x: monster.targetX,
+      duration,
+      ease: 'Sine.easeOut',
+      onUpdate: () => {
+        monster.hpText?.setPosition(monster.sprite.x, monster.sprite.y - 20);
+      },
+      onComplete: () => {
+        this.setMonsterRenderPosition(monster, monster.targetX, this.player.y);
+        monster.isMoving = false;
+        monster.motionTween = null;
+      }
+    });
   }
 
   reflowMonsterFormation() {
@@ -505,27 +546,16 @@ export default class MainScene extends Phaser.Scene {
 
     const orderedGroups = [...groups.keys()].sort((left, right) => left - right);
     orderedGroups.forEach((groupIndex) => {
-      const groupMonsters = groups
-        .get(groupIndex)
-        .slice()
-        .sort((left, right) => (left?.laneIndex ?? 0) - (right?.laneIndex ?? 0));
-
-      const baseX = 190 + groupIndex * 72;
-      const step = 62;
-      const leftmostX = baseX + 12;
-      const targetXs = [leftmostX, leftmostX + step, leftmostX + step * 2];
-
-      groupMonsters.forEach((monster, laneIndex) => {
-        if (!monster) return;
+      const groupMonsters = groups.get(groupIndex);
+      const isBossGroup = groupMonsters[0]?.isBoss ?? false;
+      const assignments = getMonsterFormationAssignments(groupMonsters, isBossGroup);
+      assignments.forEach(({ monster, laneIndex, x }) => {
         monster.groupIndex = groupIndex;
         monster.laneIndex = laneIndex;
-        monster.targetX = targetXs[laneIndex] ?? leftmostX + step * laneIndex;
-        monster.sprite.y = this.player.y;
-        if (monster.hpText) {
-          monster.hpText.y = monster.sprite.y - 20;
-          monster.hpText.x = monster.targetX;
+        monster.targetX = x;
+        if (monster.sprite.x !== monster.targetX || monster.sprite.y !== this.player.y) {
+          this.moveMonsterToLane(monster, MONSTER_FORMATION_SHIFT_DURATION);
         }
-        monster.sprite.x = monster.targetX;
       });
     });
   }
@@ -533,6 +563,7 @@ export default class MainScene extends Phaser.Scene {
   startStage() {
     this.spawnTimer?.remove(false);
     this.spawnTimer = null;
+    this.destroyCurrentMonster();
     gameState.playerState = 'WALKING';
     this.spawnMonsterWithApproach();
     this.updateUI();
@@ -556,7 +587,7 @@ export default class MainScene extends Phaser.Scene {
     for (const timer of [this.attackTimer, this.monsterAttackTimer, this.spawnTimer]) {
       if (timer) timer.paused = true;
     }
-    this.currentMonster?.approachTween?.pause();
+    for (const monster of this.activeMonsters) monster.motionTween?.pause();
     this.rebirthPausedCombat = true;
   }
 
@@ -565,7 +596,7 @@ export default class MainScene extends Phaser.Scene {
     for (const timer of [this.attackTimer, this.monsterAttackTimer, this.spawnTimer]) {
       if (timer) timer.paused = false;
     }
-    this.currentMonster?.approachTween?.resume();
+    for (const monster of this.activeMonsters) monster.motionTween?.resume();
     this.rebirthPausedCombat = false;
   }
 
@@ -620,7 +651,7 @@ export default class MainScene extends Phaser.Scene {
     this.monsterAttackTimers = [];
     this.monsterAttackTimer = null;
     for (const monster of this.activeMonsters) {
-      monster?.approachTween?.stop();
+      monster?.motionTween?.stop();
       monster?.sprite?.destroy();
       monster?.hpText?.destroy();
     }
@@ -638,9 +669,8 @@ export default class MainScene extends Phaser.Scene {
   }
 
   spawnMonsterWithApproach() {
-    if (!gameState.isPlayerAlive) return;
+    if (!gameState.isPlayerAlive || this.activeMonsters.length > 0) return;
     gameState.playerState = 'WALKING';
-    this.playerBounceTween.resume();
     const isBoss = gameState.isBossStage;
     const isFinalBoss = isBoss && gameState.round === 25;
     const hp = getMonsterMaxHp(gameState.stage, gameState.round, isBoss, gameState.realmIndex);
@@ -652,13 +682,13 @@ export default class MainScene extends Phaser.Scene {
       -1
     );
     const groupIndex = highestExistingGroupIndex + 1;
-    const groupAnchorX = 120 + groupIndex * 72;
-    const step = 62;
-    const leftmostX = groupAnchorX + 12;
-    const targetXs = [leftmostX, leftmostX + step, leftmostX + step * 2];
+    const spawnLaneIndexes = getMonsterFormationLaneIndexes(
+      isBoss ? BOSS_SPAWN_COUNT : MONSTER_SPAWN_COUNT
+    );
 
-    for (let spawnIndex = 0; spawnIndex < MONSTER_SPAWN_COUNT; spawnIndex += 1) {
-      const spriteX = targetXs[spawnIndex];
+    spawnLaneIndexes.forEach((laneIndex, spawnIndex) => {
+      const laneX = getMonsterLaneX(laneIndex);
+      const spriteX = laneX + MONSTER_GROUP_ENTRY_OFFSET;
       const spriteY = this.player.y;
       const sprite = this.add.rectangle(spriteX, spriteY, size, size, color);
       const hpText = this.add.text(spriteX, spriteY - 20, `HP: ${hp}`, { fontSize: '12px', fill: '#ff8a80' }).setOrigin(0.5);
@@ -666,18 +696,25 @@ export default class MainScene extends Phaser.Scene {
         sprite, hp, maxHp: hp, hpText,
         isBoss, isApproaching: false, spawnIndex,
         groupIndex,
-        laneIndex: spawnIndex,
-        targetX: spriteX,
+        laneIndex,
+        targetX: laneX,
         targetY: spriteY,
+        isMoving: true,
+        motionTween: null,
         attackTimer: null,
-        attackRange: 170
+        attackRange: isBoss ? BOSS_MONSTER_ATTACK_RANGE : MONSTER_ATTACK_RANGE
       };
       this.activeMonsters.push(monster);
 
       monster.attackTimer = this.time.addEvent({
         delay: 1000,
         callback: () => {
-          if (!gameState.isPlayerAlive || monster.hp <= 0 || monster.sprite.destroyed) return;
+          if (
+            !gameState.isPlayerAlive
+            || !this.activeMonsters.includes(monster)
+            || monster.hp <= 0
+            || monster.sprite.destroyed
+          ) return;
           const nearestMonster = this.activeMonsters
             .filter((candidate) => candidate && candidate.hp > 0 && candidate.sprite && !candidate.sprite.destroyed)
             .sort((left, right) => Math.abs(this.player.x - left.sprite.x) - Math.abs(this.player.x - right.sprite.x))[0];
@@ -691,7 +728,8 @@ export default class MainScene extends Phaser.Scene {
         loop: true
       });
       this.monsterAttackTimers.push(monster.attackTimer);
-    }
+      this.moveMonsterToLane(monster, MONSTER_GROUP_ENTRY_DURATION);
+    });
     this.spawnGroupOffset = groupIndex;
     this.reflowMonsterFormation();
     this.currentMonster = this.syncCurrentMonster();
@@ -704,7 +742,10 @@ export default class MainScene extends Phaser.Scene {
       .filter((monster) => monster && monster.hp > 0 && monster.sprite && !monster.sprite.destroyed)
       .sort((left, right) => Math.abs(this.player.x - left.sprite.x) - Math.abs(this.player.x - right.sprite.x))[0];
 
-    if (!inRangeMonster || Math.abs(this.player.x - inRangeMonster.sprite.x) > 170) {
+    if (
+      !inRangeMonster
+      || Math.abs(this.player.x - inRangeMonster.sprite.x) > getPlayerAttackRange(inRangeMonster.isBoss)
+    ) {
       this.currentMonster = this.syncCurrentMonster();
       return;
     }
@@ -723,6 +764,10 @@ export default class MainScene extends Phaser.Scene {
   damageMonster(monster, amount, isCrit) {
     if (this.devPanelOpen || !monster || monster.hp <= 0 || !gameState.isPlayerAlive) return;
     monster.hp -= amount;
+    gameState.currentHealth = Math.min(
+      getFinalMaxHealth(gameState),
+      gameState.currentHealth + getRecoveryAmount(gameState)
+    );
     const dmgText = this.add.text(
       monster.sprite.x + Math.floor(Math.random() * 20 - 10), 170,
       isCrit ? `💥 ${amount}!` : `-${amount}`,
@@ -784,7 +829,7 @@ export default class MainScene extends Phaser.Scene {
     monster.attackTimer?.remove(false);
     this.monsterAttackTimers = this.monsterAttackTimers.filter((timer) => timer !== monster.attackTimer);
     monster.attackTimer = null;
-    monster.approachTween?.stop();
+    monster.motionTween?.stop();
     monster.sprite?.destroy();
     monster.hpText?.destroy();
     this.activeMonsters = this.activeMonsters.filter((activeMonster) => activeMonster !== monster);
@@ -809,7 +854,9 @@ export default class MainScene extends Phaser.Scene {
       if (!this.activeMonsters.length) {
         this.spawnTimer = this.time.delayedCall(200, () => {
           this.spawnTimer = null;
-          this.spawnMonsterWithApproach();
+          if (gameState.isPlayerAlive && this.activeMonsters.length === 0) {
+            this.spawnMonsterWithApproach();
+          }
         });
       }
     }
@@ -987,6 +1034,7 @@ export default class MainScene extends Phaser.Scene {
     const labels = {
       atkLevel: `공격력 Lv.${gameState.atkLevel} · +2`,
       healthLevel: `체력 Lv.${gameState.healthLevel} · 최대 체력 +20`,
+      recoveryLevel: `회복 Lv.${gameState.recoveryLevel} · 적중 시 +${getRecoveryAmount(gameState)} 체력`,
       critRateLevel: `치명타 확률 ${getFinalCritRate(gameState)}% · +0.1%p`,
       critDamageLevel: `치명타 피해 ${getFinalCritDamage(gameState)}% · +1%p`,
       atkSpeedLevel: `공격속도 Lv.${gameState.atkSpeedLevel} · 간격 ${getFinalAtkSpeed(gameState)}ms`,
